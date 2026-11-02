@@ -1,0 +1,9 @@
+# Source materials (third-party theses, interview transcripts) and reference screenshots – not for a public repo
+podklady/
+design/
+
+node_modules/
+dist/
+*.tsbuildinfo
+*.local
+.DS_Store

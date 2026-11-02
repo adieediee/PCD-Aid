@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+/* Tokens – see DESIGN.md */
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-canvas: #F2F3F7;
+  --color-surface: #FFFFFF;
+  --color-surface-muted: #F7F8FA;
+  --color-border: #E7E9EF;
+
+  --color-ink-900: #0F1B33;
+  --color-ink-600: #5B6475;
+  --color-ink-400: #9AA1AE;
+  --color-ink-200: #D5D9E2;
+
+  --color-ai-50: #EEF0FF;
+  --color-ai-100: #DDE1FF;
+  --color-ai-600: #3A3AF4;
+  --color-ai-700: #2B2BD1;
+
+  --color-ok: #15803D;
+  --color-ok-bg: #E8F7EE;
+  --color-bad: #D93036;
+  --color-bad-bg: #FDECEC;
+  --color-wait: #B45309;
+  --color-wait-bg: #FEF4E2;
+
+  --radius-card: 20px;
+  --radius-inner: 12px;
+
+  --shadow-pop: 0 8px 24px rgba(15, 27, 51, 0.08);
+}
+
+/* Always reserve scrollbar space so the layout doesn't jump when content starts to scroll. */
+html {
+  scrollbar-gutter: stable;
+}
+
+.overflow-y-auto {
+  scrollbar-gutter: stable;
+}
+
+/* Thin, quiet scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-200) transparent;
+}
+
+body {
+  @apply bg-canvas text-ink-900 font-sans antialiased;
+  font-size: 14px;
+}
+
+.hatch {
+  background: repeating-linear-gradient(135deg, var(--color-ink-200) 0 2px, transparent 2px 7px);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
