@@ -1,16 +1,16 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, ArrowUpRight, Check, Minus, PenLine, Share2, Sparkles } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, Minus, PenLine, Share2, Sparkles } from 'lucide-react'
 import { Button, ExamPill, PatientStatusPill, Segmented } from '../components/ui'
 import AiPanel, { AiFeedback } from '../components/AiPanel'
 import TemTab from '../components/TemTab'
 import {
   CLINICAL_INDEX_ITEMS, MIN_CILIA, NNO_THRESHOLD, PATIENTS, PICADAR_CUTOFF, PICADAR_ITEMS, PICADAR_MAX, ageOf, idleDays,
 } from '../data/patients'
-import { caseSummary, findConflicts, findSimilar, outcomeSummary, type Conflict } from '../ai/engine'
+import { caseSummary, findConflicts, type Conflict } from '../ai/engine'
 import { DEFECT_LABEL, EXAM_STATUS, ROLES } from '../labels'
-import { useConclusion } from '../conclusions'
-import { NnoForm } from '../components/Forms'
+import { useConclusion, type Conclusion as ConclusionData } from '../conclusions'
+import { AnamnesisModal, NnoForm } from '../components/Forms'
 import { useStoreVersion, visitPatient } from '../store'
 import { useRole } from '../role'
 import type { ExamStatus, Patient } from '../types'
@@ -43,10 +43,11 @@ function Avatar({ initials, title }: { initials: string; title: string }) {
 function ConclusionButton({ p }: { p: Patient }) {
   const { role } = useRole()
   const saved = useConclusion(p.id)
-  if (!saved && role !== 'vojtech') return null // only the treating clinician concludes
+  // Only the treating clinician concludes; once saved, the conclusion card in the profile takes over.
+  if (saved || role !== 'vojtech') return null
   return (
     <Link to={`/patients/${p.id}/conclusion`}>
-      <Button variant="primary">{saved ? <><Check size={16} /> Zobraziť záver</> : <><PenLine size={16} /> Napísať záver</>}</Button>
+      <Button variant="primary"><PenLine size={16} /> Napísať záver</Button>
     </Link>
   )
 }
@@ -66,7 +67,7 @@ function Header({ p, aiOpen, onAi }: { p: Patient; aiOpen: boolean; onAi: () => 
         </div>
         <div className="flex items-center gap-2">
           <Button><Share2 size={16} /> Zdieľať</Button>
-          {!aiOpen && <Button variant="ai" onClick={onAi}><Sparkles size={16} /> Podobné prípady</Button>}
+          {!aiOpen && <Button variant="aiSoft" onClick={onAi}><Sparkles size={16} /> Podobné prípady</Button>}
           <ConclusionButton p={p} />
         </div>
       </div>
@@ -159,6 +160,37 @@ function ExamOverview({ p, tab, setTab }: { p: Patient; tab: TabId; setTab: (t: 
   )
 }
 
+// ---------- Conclusion ----------
+
+function ConclusionCard({ p, c }: { p: Patient; c: ConclusionData }) {
+  const { role } = useRole()
+  return (
+    <div className="rounded-card bg-surface p-6 ring-2 ring-ink-900 ring-offset-2 ring-offset-canvas">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          {label('Záver')}
+          <div className="mt-2 flex items-center gap-3">
+            <PatientStatusPill status={c.verdict} />
+            <span className="text-[13px] text-ink-600">{ROLES[c.author].name} · {formatDate(c.date)}</span>
+          </div>
+        </div>
+        <Link to={`/patients/${p.id}/conclusion`}>
+          <Button size="sm">{role === 'vojtech' ? 'Zobraziť / upraviť' : 'Zobraziť celý'}</Button>
+        </Link>
+      </div>
+      {c.reasoning
+        ? <p className="mt-4 line-clamp-3 whitespace-pre-line leading-relaxed">{c.reasoning}</p>
+        : <p className="mt-4 text-ink-400">Bez zdôvodnenia</p>}
+      {c.nextSteps.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
+          <span className="text-ink-600">Ďalší postup</span>
+          {c.nextSteps.map((s) => <span key={s} className="flex items-center gap-1.5"><Check size={14} />{s}</span>)}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---------- AI: summary + conflicts (F05) ----------
 
 function ConflictBlock({ c }: { c: Conflict }) {
@@ -204,37 +236,6 @@ function AiSummary({ p }: { p: Patient }) {
       <p className="mt-2 text-xs text-ink-600">Súhrn je zostavený len z údajov v profile. Nejde o diagnózu.</p>
       {conflicts.map((c) => <ConflictBlock key={c.title} c={c} />)}
     </div>
-  )
-}
-
-function SimilarHero({ p, onOpen }: { p: Patient; onOpen: () => void }) {
-  const o = outcomeSummary(findSimilar(p))
-  return (
-    <button onClick={onOpen} className="group relative overflow-hidden rounded-card bg-ai-600 p-5 text-left text-white cursor-pointer">
-      {/* decorative circles */}
-      <span className="pointer-events-none absolute -right-16 -bottom-24 size-64 rounded-full border border-white/15" />
-      <span className="pointer-events-none absolute -right-4 -bottom-10 size-32 rounded-full border border-white/15" />
-      <div className="flex items-center justify-between">
-        <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-white/40 px-3 text-xs font-medium">
-          <Sparkles size={12} /> AI · Podobné prípady
-        </span>
-        <span className="flex size-8 items-center justify-center rounded-full border border-white/40 transition-colors group-hover:bg-white group-hover:text-ai-600">
-          <ArrowUpRight size={16} />
-        </span>
-      </div>
-      {o.total === 0 ? (
-        <p className="relative mt-8 text-lg leading-snug">Žiadny dostatočne podobný pacient v databáze.</p>
-      ) : o.closed === 0 ? (
-        <p className="relative mt-8 text-lg leading-snug">{o.total} podobných pacientov, zatiaľ žiadny so záverom.</p>
-      ) : (
-        <p className="relative mt-8 text-[22px] leading-snug tracking-[-0.01em]">
-          <span className="num">{o.confirmed} z {o.closed}</span> podobných pacientov so záverom malo potvrdenú PCD
-        </p>
-      )}
-      <p className="relative mt-2 text-xs text-white/75">
-        {o.open > 0 ? `+ ${o.open} ešte bez záveru · ` : ''}{o.closed > 0 && o.closed < 10 ? 'malá vzorka' : 'zobraziť pacientov'}
-      </p>
-    </button>
   )
 }
 
@@ -336,26 +337,55 @@ function NnoTab({ p }: { p: Patient }) {
 
 const SITUS_LABEL = { solitus: 'Situs solitus (normálny)', inversus: 'Situs inversus', ambiguus: 'Heterotaxia (situs ambiguus)' }
 
-function TabContent({ p, tab }: { p: Patient; tab: TabId }) {
+function AnamnesisTab({ p }: { p: Patient }) {
+  const { role } = useRole()
+  const [editing, setEditing] = useState(false)
+  const canEdit = role === 'vojtech' // taken by the pediatrician
   const a = p.anamnesis
+  const modal = editing && <AnamnesisModal p={p} onClose={() => setEditing(false)} />
+
+  if (!a) {
+    return (
+      <div className="hatch flex flex-col items-center rounded-inner py-12 text-center">
+        <div className="max-w-sm rounded-inner bg-surface px-5 py-4">
+          <p className="font-semibold">Anamnéza zatiaľ nie je zapísaná</p>
+          <p className="mt-1 text-[13px] text-ink-600">
+            {canEdit
+              ? 'Ak ju máš v UNIS alebo na dotazníku, môžeš ju sem prepísať. Dopočíta sa z nej PICADAR a klinický index.'
+              : 'Anamnézu zapisuje ošetrujúci lekár.'}
+          </p>
+          {canEdit && <Button size="sm" variant="primary" className="mt-3" onClick={() => setEditing(true)}><PenLine size={14} /> Vyplniť anamnézu</Button>}
+        </div>
+        {modal}
+      </div>
+    )
+  }
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-2">
+        <YesNo label="Porucha laterality" value={a.situs !== 'solitus'} detail={SITUS_LABEL[a.situs]} />
+        <YesNo label="RDS novorodenca" value={a.neonatalRds} />
+        <YesNo label="Hospitalizácia na JIS novorodencov" value={a.nicu} />
+        <YesNo label="Vrodená srdcová vada" value={a.heartDefect} />
+        <YesNo label="PCD v rodine" value={a.familyPcd} />
+        <YesNo label="Počet súrodencov" value={a.siblings > 0} detail={String(a.siblings)} />
+        <YesNo label="Denný vlhký kašeľ" value={a.wetCough} />
+        <YesNo label="Chronická rinitída" value={a.rhinitis} />
+        <YesNo label="Ušné / sluchové problémy" value={a.otitis} />
+        <YesNo label="Narodenie v termíne" value={a.fullTerm} />
+      </div>
+      {canEdit && <Button size="sm" className="mt-6" onClick={() => setEditing(true)}><PenLine size={14} /> Upraviť anamnézu</Button>}
+      {modal}
+    </div>
+  )
+}
+
+function TabContent({ p, tab }: { p: Patient; tab: TabId }) {
   const e = p.exams
 
   switch (tab) {
     case 'anamnesis':
-      return (
-        <div className="grid grid-cols-2 gap-2">
-          <YesNo label="Porucha laterality" value={a.situs !== 'solitus'} detail={SITUS_LABEL[a.situs]} />
-          <YesNo label="RDS novorodenca" value={a.neonatalRds} />
-          <YesNo label="Hospitalizácia na JIS novorodencov" value={a.nicu} />
-          <YesNo label="Vrodená srdcová vada" value={a.heartDefect} />
-          <YesNo label="PCD v rodine" value={a.familyPcd} />
-          <YesNo label="Počet súrodencov" value={a.siblings > 0} detail={String(a.siblings)} />
-          <YesNo label="Denný vlhký kašeľ" value={a.wetCough} />
-          <YesNo label="Chronická rinitída" value={a.rhinitis} />
-          <YesNo label="Ušné / sluchové problémy" value={a.otitis} />
-          <YesNo label="Narodenie v termíne" value={a.fullTerm} />
-        </div>
-      )
+      return <AnamnesisTab p={p} />
     case 'nno':
       return <NnoTab p={p} />
     case 'hsvm':
@@ -409,7 +439,11 @@ export default function PatientProfile() {
   const [tab, setTab] = useState<TabId>((params.get('tab') as TabId) ?? 'anamnesis')
   useStoreVersion() // re-render after in-memory edits (nNO, uploads, conclusion)
   useEffect(() => { if (id && PATIENTS.some((x) => x.id === id)) visitPatient(id) }, [id])
+  // Follow ?tab= also when the profile is already open (e.g. from a notification).
+  const tabParam = params.get('tab') as TabId | null
+  useEffect(() => { if (tabParam) setTab(tabParam) }, [tabParam, id])
   const p = PATIENTS.find((x) => x.id === id)
+  const conclusion = useConclusion(id)
   const aiOpen = params.get('ai') === 'similar'
   const setAiOpen = (open: boolean) => setParams(open ? { ai: 'similar' } : {})
 
@@ -434,6 +468,7 @@ export default function PatientProfile() {
 
         <div className={`grid gap-4 ${aiOpen ? 'grid-cols-1' : 'grid-cols-3'}`}>
           <div className={`flex flex-col gap-4 ${aiOpen ? '' : 'col-span-2'}`}>
+            {conclusion && <ConclusionCard p={p} c={conclusion} />}
             <AiSummary p={p} />
             <div className="rounded-card bg-surface p-6">
               <div className="mb-5 flex items-center justify-between">
@@ -452,15 +487,15 @@ export default function PatientProfile() {
 
           {!aiOpen && (
             <div className="flex flex-col gap-4">
-              <SimilarHero p={p} onOpen={() => setAiOpen(true)} />
               <ScoreCard
                 title="PICADAR" score={p.picadar} max={PICADAR_MAX} cutoff={PICADAR_CUTOFF}
-                note={!p.anamnesis.wetCough ? 'Neaplikuje sa – bez denného vlhkého kašľa' : undefined}
-                items={PICADAR_ITEMS.map((i) => ({ label: i.label, points: i.points, on: i.get(p.anamnesis) }))}
+                note={!p.anamnesis ? 'Bez anamnézy' : !p.anamnesis.wetCough ? 'Neaplikuje sa – bez denného vlhkého kašľa' : undefined}
+                items={PICADAR_ITEMS.map((i) => ({ label: i.label, points: i.points, on: !!p.anamnesis && i.get(p.anamnesis) }))}
               />
               <ScoreCard
                 title="Klinický index" score={p.clinicalIndex} max={CLINICAL_INDEX_ITEMS.length}
-                items={CLINICAL_INDEX_ITEMS.map((i) => ({ label: i.label, on: i.get(p.anamnesis) }))}
+                note={!p.anamnesis ? 'Bez anamnézy' : undefined}
+                items={CLINICAL_INDEX_ITEMS.map((i) => ({ label: i.label, on: !!p.anamnesis && i.get(p.anamnesis) }))}
               />
             </div>
           )}

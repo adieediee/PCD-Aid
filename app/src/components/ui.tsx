@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
-import { Check, ChevronDown, Sparkles, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Sparkles, X } from 'lucide-react'
 import { EXAM_STATUS, PATIENT_STATUS } from '../labels'
 import type { ExamStatus, PatientStatus } from '../types'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'ai'
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'ai' | 'aiSoft'
 
 const BUTTON: Record<ButtonVariant, string> = {
   primary: 'bg-ink-900 text-white hover:bg-ink-900/90',
   secondary: 'bg-surface text-ink-900 border border-border hover:bg-surface-muted',
   ghost: 'text-ink-600 hover:bg-surface-muted hover:text-ink-900',
   ai: 'bg-ai-600 text-white hover:bg-ai-700',
+  aiSoft: 'border border-ai-100 bg-ai-50 text-ai-700 hover:bg-ai-100',
 }
 
 export function Button({
@@ -136,6 +137,29 @@ export function Tag({ children }: { children: ReactNode }) {
   )
 }
 
+export function Pagination({ page, pageCount, pageSize, total, onChange, className }: {
+  page: number; pageCount: number; pageSize: number; total: number; onChange: (page: number) => void; className?: string
+}) {
+  const pageButton = 'flex size-8 items-center justify-center rounded-full text-[13px] font-medium transition-colors cursor-pointer disabled:cursor-default disabled:text-ink-400 disabled:hover:bg-transparent'
+  return (
+    <nav aria-label="Stránkovanie" className={cx('flex items-center gap-1', className)}>
+      <span className="num mr-2 text-xs text-ink-600">{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} z {total}</span>
+      <button aria-label="Predchádzajúca strana" disabled={page === 1} onClick={() => onChange(page - 1)} className={cx(pageButton, 'text-ink-900 hover:bg-surface-muted')}>
+        <ChevronLeft size={16} />
+      </button>
+      {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
+        <button key={n} aria-current={n === page ? 'page' : undefined} onClick={() => onChange(n)}
+          className={cx(pageButton, 'num', n === page ? 'bg-ink-900 text-white' : 'text-ink-600 hover:bg-surface-muted hover:text-ink-900')}>
+          {n}
+        </button>
+      ))}
+      <button aria-label="Ďalšia strana" disabled={page === pageCount} onClick={() => onChange(page + 1)} className={cx(pageButton, 'text-ink-900 hover:bg-surface-muted')}>
+        <ChevronRight size={16} />
+      </button>
+    </nav>
+  )
+}
+
 export function Segmented<V extends string>({
   value, options, onChange,
 }: { value: V; options: { value: V; label: string; count?: number; dot?: string }[]; onChange: (v: V) => void }) {
@@ -212,6 +236,17 @@ export function MenuItem({ selected, multi, onClick, children }: { selected: boo
 }
 
 /** Filter chip with a dropdown of options (multi or single select). */
+/** Fixed-size trailing slot of a filter chip: chevron when empty, selection count when active – the chip never changes width. */
+export function CountSlot({ n, ai = false }: { n: number; ai?: boolean }) {
+  return (
+    <span className="flex size-[18px] shrink-0 items-center justify-center">
+      {n > 0
+        ? <span className={cx('num flex size-[18px] items-center justify-center rounded-full text-[11px] font-semibold', ai ? 'bg-ai-700 text-white' : 'bg-white text-ink-900')}>{n}</span>
+        : <ChevronDown size={14} className="opacity-70" />}
+    </span>
+  )
+}
+
 export function FilterMenu<V extends string>({
   label, options, selected, multi = false, ai = false, onChange, count,
 }: {
@@ -226,7 +261,7 @@ export function FilterMenu<V extends string>({
 }) {
   const { open, setOpen, ref } = usePopover()
   const active = selected.length > 0
-  const first = options.find((o) => o.value === selected[0])?.label
+  const picked = options.filter((o) => selected.includes(o.value)).map((o) => o.label).join(', ')
   const toggle = (v: V) => {
     if (multi) onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v])
     else { onChange(selected.includes(v) ? [] : [v]); setOpen(false) }
@@ -234,10 +269,11 @@ export function FilterMenu<V extends string>({
 
   return (
     <div ref={ref} className="relative">
-      <button className={chipClass(active, ai)} onClick={() => setOpen(!open)}>
+      {/* Label stays the same and the count takes the chevron's slot, so picking options doesn't move the bar. */}
+      <button className={cx(chipClass(active, ai), 'pr-2.5')} onClick={() => setOpen(!open)} title={active ? `${label}: ${picked}` : undefined}>
         {active && ai && <Sparkles size={14} />}
-        {active ? `${label}: ${first}${selected.length > 1 ? ` +${selected.length - 1}` : ''}` : label}
-        <ChevronDown size={14} className="opacity-70" />
+        {label}
+        <CountSlot n={selected.length} ai={ai} />
       </button>
       {open && (
         <Popover className="min-w-60">

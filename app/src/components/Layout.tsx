@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Bell, ChevronDown, CircleHelp, Settings, Share2, Users, type LucideIcon } from 'lucide-react'
+import { Bell, ChevronDown, CircleHelp, Settings, Users, type LucideIcon } from 'lucide-react'
 import { IconButton, MenuItem, Popover, usePopover } from './ui'
 import QuickSearch from './QuickSearch'
 import { ROLES } from '../labels'
@@ -37,8 +37,7 @@ function NavItem({ to, label, icon: Icon, active, badge }: { to: string; label: 
 }
 
 function Sidebar() {
-  const { pathname, search } = useLocation()
-  const shared = new URLSearchParams(search).get('tab') === 'shared'
+  const { pathname } = useLocation()
   const onPatients = pathname.startsWith('/patients')
   const { role } = useRole()
   const unread = useNotifications(role).unread.length
@@ -48,9 +47,8 @@ function Sidebar() {
       <Logo />
       <p className="mt-10 mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-400">Menu</p>
       <nav className="flex flex-col gap-1">
-        <NavItem to="/patients" label="Pacienti" icon={Users} active={onPatients && !shared} />
+        <NavItem to="/patients" label="Pacienti" icon={Users} active={onPatients} />
         <NavItem to="/notifications" label="Notifikácie" icon={Bell} active={pathname === '/notifications'} badge={unread} />
-        <NavItem to="/patients?tab=shared" label="Zdieľané prípady" icon={Share2} active={onPatients && shared} />
       </nav>
       <p className="mt-8 mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-400">Všeobecné</p>
       <nav className="flex flex-col gap-1">

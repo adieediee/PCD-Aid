@@ -188,11 +188,12 @@ function SavedCard({ p, c, canEdit, onEdit }: { p: Patient; c: ConclusionData; c
       <div className="mt-6 rounded-inner border border-ai-100 bg-ai-50 p-4 text-[13px]">
         <div className="flex items-center gap-2 font-semibold text-ai-700">
           <Sparkles size={14} />
-          {c.ai === 'agreed' && 'AI kontrola nenašla rozpor s vaším záverom'}
+          {c.ai === 'agreed' && 'Kontrola prebehla – AI sa neozvala'}
           {c.ai === 'disagreed-kept' && 'AI mala iný názor – záver ponechaný'}
           {c.ai === 'disagreed-changed' && 'Záver upravený po druhom názore AI'}
         </div>
         {c.ai === 'disagreed-kept' && <p className="mt-1.5 text-ink-600">{op.headline || 'Podklady sa odvtedy zmenili.'}</p>}
+        {c.ai === 'agreed' && <p className="mt-1.5 text-ink-600">Neznamená to potvrdenie záveru – AI len nenašla v podkladoch nič, čo by mu zjavne odporovalo.</p>}
         {c.keepNote && <p className="mt-1.5 text-ink-900">Poznámka lekára: „{c.keepNote}“</p>}
         {why && <WhyDetail op={op} />}
         <div className="mt-1 -ml-2"><AiFeedback why={why} onWhy={() => setWhy(!why)} /></div>

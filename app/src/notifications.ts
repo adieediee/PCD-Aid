@@ -103,8 +103,8 @@ function seed(): Notification[] {
       title: 'Nová správa z TEM', text: `Autor: ${ROLES.michaela.name} · normálna ultraštruktúra, 142 riasiniek`,
     },
     {
-      id: 'share-0163', type: 'sharing', patientId: 'PCD-0163', at: t - 11 * D, to: ['vojtech', 'lucia'],
-      title: 'Prípad zdieľaný s vami', text: `Zdieľa: ${ROLES.michaela.name} · ${ROLES.michaela.title}`,
+      id: 'share-0163', type: 'sharing', patientId: 'PCD-0163', at: t - 11 * D, to: LAB,
+      title: 'Prípad zdieľaný s vami', text: `Zdieľa: ${ROLES.vojtech.name} · ${ROLES.vojtech.title}`,
     },
     {
       id: 'nno-0163', type: 'results', patientId: 'PCD-0163', tab: 'nno', at: t - 10 * D, to: LAB,

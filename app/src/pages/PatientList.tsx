@@ -4,7 +4,7 @@ import {
   ArrowDown, ArrowRight, ArrowUp, ArrowUpRight, Clock, Ellipsis, Plus, Search, Sparkles, ThumbsDown, ThumbsUp, X,
 } from 'lucide-react'
 import {
-  Button, ExamPill, FilterMenu, PatientStatusPill, Tag, Segmented, chipClass, usePopover, Popover,
+  Button, ExamPill, FilterMenu, Pagination, PatientStatusPill, Tag, chipClass, usePopover, Popover,
 } from '../components/ui'
 import { PATIENTS, MIN_CILIA, ageOf, idleDays, isStale } from '../data/patients'
 import { AddPatientModal } from '../components/Forms'
@@ -17,13 +17,26 @@ import {
 } from '../filters'
 import { EXAMPLE_QUERIES, parseQuery, type ParseResult } from '../ai/parseQuery'
 import { useRole } from '../role'
-import type { Patient, PatientStatus, RoleId, TemDefect } from '../types'
+import type { Anamnesis, ExamStatus, Patient, PatientStatus, TemDefect } from '../types'
 
-type Tab = 'mine' | 'shared' | 'all'
-type SortKey = 'id' | 'picadar' | 'nno' | 'lastActivity'
+type SortKey = 'id' | 'status' | 'anamnesis' | 'picadar' | 'nno' | 'hsvm' | 'tem' | 'if' | 'genetics' | 'lastActivity'
+type ExamKey = 'hsvm' | 'tem' | 'if' | 'genetics'
+
+// Group order when sorting by a status column: workflow order for patients, most telling result first for exams.
+const STATUS_RANK: Record<PatientStatus, number> = { diagnostics: 0, unclear: 1, confirmed: 2, excluded: 3 }
+const EXAM_RANK: Record<ExamStatus, number> = { abnormal: 0, pending: 1, normal: 2, notDone: 3 }
+
+const PAGE_SIZE = 15
+const ROW_HEIGHT = 56 // h-14
+const TABLE_HEADER_HEIGHT = 56 // header row + its top margin
+
+const anamnesisCount = (p: Patient) => {
+  const a = p.anamnesis
+  if (!a) return -1
+  return [a.situs !== 'solitus', a.neonatalRds, a.heartDefect, a.familyPcd].filter(Boolean).length
+}
 
 const STATUS_OPTIONS = (Object.keys(PATIENT_STATUS) as PatientStatus[]).map((s) => ({ value: s, label: PATIENT_STATUS[s].label }))
-const SHARER_OPTIONS = (Object.keys(ROLES) as RoleId[]).map((r) => ({ value: r, label: ROLES[r].name }))
 const DEFECT_OPTIONS = (Object.keys(DEFECT_LABEL) as TemDefect[]).map((d) => ({ value: d, label: DEFECT_LABEL[d] }))
 
 function relative(days: number) {
@@ -205,11 +218,28 @@ function SortHeader({ label, k, sort, onSort, className = '' }: {
   )
 }
 
+const ANAMNESIS_TAGS: { short: string; full: string; on: (a: Anamnesis) => boolean }[] = [
+  { short: 'Situs', full: 'Porucha laterality', on: (a) => a.situs !== 'solitus' },
+  { short: 'RDS', full: 'RDS novorodenca', on: (a) => a.neonatalRds },
+  { short: 'Srdce', full: 'Srdcová vada', on: (a) => a.heartDefect },
+  { short: 'Rodina', full: 'PCD v rodine', on: (a) => a.familyPcd },
+]
+const MAX_TAGS = 2 // + a "+N" tag still fits the fixed column width
+
 function AnamnesisTags({ p }: { p: Patient }) {
   const a = p.anamnesis
-  const tags = [a.situs !== 'solitus' && 'Situs', a.neonatalRds && 'RDS', a.heartDefect && 'Srdce', a.familyPcd && 'Rodina'].filter(Boolean)
-  if (!tags.length) return <span className="text-ink-400">—</span>
-  return <div className="flex flex-wrap gap-1">{tags.map((t) => <Tag key={t as string}>{t}</Tag>)}</div>
+  // Fixed width + one line, so rows keep the same height and the column never grows; the rest goes into "+N" (full list on hover).
+  const box = 'flex w-[136px] flex-nowrap items-center gap-1 overflow-hidden'
+  if (!a) return <div className={box}><span className="text-xs text-ink-400">nevyplnená</span></div>
+  const tags = ANAMNESIS_TAGS.filter((t) => t.on(a))
+  if (!tags.length) return <div className={box}><span className="text-ink-400">—</span></div>
+  const shown = tags.slice(0, MAX_TAGS)
+  return (
+    <div className={box} title={tags.map((t) => t.full).join(', ')}>
+      {shown.map((t) => <Tag key={t.short}>{t.short}</Tag>)}
+      {shown.length < tags.length && <Tag>+{tags.length - shown.length}</Tag>}
+    </div>
+  )
 }
 
 function RowMenu({ id }: { id: string }) {
@@ -246,8 +276,7 @@ export default function PatientList() {
   const navigate = useNavigate()
   const { role } = useRole()
   const [params, setParams] = useSearchParams()
-  const tab = (params.get('tab') as Tab) ?? 'mine'
-  const setTab = (t: Tab) => setParams(t === 'mine' ? {} : { tab: t })
+  // Clinicians own cases ("Moji"); the lab works on cases shared with them.
 
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [aiKeys, setAiKeys] = useState<FilterKey[]>([])
@@ -257,6 +286,7 @@ export default function PatientList() {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'lastActivity', dir: 1 })
   const [adding, setAdding] = useState(false)
   const [added, setAdded] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
   const version = useStoreVersion()
 
   // Manual change of a filter takes it out of AI ownership.
@@ -295,24 +325,38 @@ export default function PatientList() {
     }, 700)
   }
 
-  const inTab = useMemo(
-    () => PATIENTS.filter((p) => (tab === 'mine' ? p.owner === role : tab === 'shared' ? p.sharedWith.includes(role) : true)),
-    [tab, role, version],
-  )
-
   const rows = useMemo(() => {
     const idQuery = isIdQuery(input) ? idDigits(input) : null
-    const list = inTab.filter((p) => matches(p, filters) && (!idQuery || p.id.includes(idQuery)))
-    const val = (p: Patient): number | string => {
+    const list = PATIENTS.filter((p) => matches(p, filters) && (!idQuery || p.id.includes(idQuery)))
+    // Exam columns group by status first, then by the value shown in the pill (defect, gene…).
+    const exam = (p: Patient, k: ExamKey, detail = ''): (number | string)[] => [EXAM_RANK[p.exams[k].status], detail]
+    const val = (p: Patient): (number | string)[] => {
       switch (sort.key) {
-        case 'id': return p.id
-        case 'picadar': return p.picadar ?? -1
-        case 'nno': return p.exams.nno.value ?? 9999
-        case 'lastActivity': return idleDays(p)
+        case 'id': return [p.id]
+        case 'status': return [STATUS_RANK[p.status]]
+        case 'anamnesis': return [-anamnesisCount(p)]
+        case 'picadar': return [p.picadar ?? -1]
+        case 'nno': return [p.exams.nno.value ?? 9999]
+        case 'hsvm': return exam(p, 'hsvm')
+        case 'tem': return exam(p, 'tem', temText(p) ?? '')
+        case 'if': return exam(p, 'if')
+        case 'genetics': return exam(p, 'genetics', geneticsText(p) ?? '')
+        case 'lastActivity': return [idleDays(p)]
       }
     }
-    return [...list].sort((a, b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * sort.dir)
-  }, [inTab, filters, input, sort])
+    const cmp = (a: Patient, b: Patient) => {
+      const va = val(a), vb = val(b)
+      for (let i = 0; i < va.length; i++) if (va[i] !== vb[i]) return va[i] > vb[i] ? 1 : -1
+      return 0
+    }
+    return [...list].sort((a, b) => cmp(a, b) * sort.dir)
+  }, [version, filters, input, sort])
+
+  // Any change of the result set (filter, sort, search) starts from the first page.
+  useEffect(() => setPage(1), [rows])
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount)
+  const pageRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   // Query handed over from the top bar search (?q=…): ID → filter, sentence → F02.
   const handedQuery = params.get('q')
@@ -320,21 +364,19 @@ export default function PatientList() {
     if (!handedQuery) return
     setInput(handedQuery)
     if (!isIdQuery(handedQuery)) ask(handedQuery)
-    setParams(tab === 'mine' ? {} : { tab }, { replace: true })
+    setParams({}, { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handedQuery])
 
   const onSort = (k: SortKey) => setSort((s) => (s.key === k ? { key: k, dir: s.dir === 1 ? -1 : 1 } : { key: k, dir: 1 }))
 
   const openQueue = (q: QueueId) => {
-    const on = filters.queue === q
-    setFilter('queue', on ? null : q)
-    if (!on && tab !== 'all') setTab('all')
+    setFilter('queue', filters.queue === q ? null : q)
   }
 
   const hasFilters = activeKeys(filters).length > 0 || input.trim() !== ''
   const chipActive = activeKeys(filters).filter((k) => CHIP_KEYS.includes(k) || k === 'queue')
-  const facet = <K extends FilterKey>(key: K, value: Filters[K]) => inTab.filter((p) => matches(p, { ...filters, [key]: value })).length
+  const facet = <K extends FilterKey>(key: K, value: Filters[K]) => PATIENTS.filter((p) => matches(p, { ...filters, [key]: value })).length
   const ai = (k: FilterKey) => aiKeys.includes(k)
 
   return (
@@ -345,7 +387,7 @@ export default function PatientList() {
           <h1 className="text-[28px] font-semibold tracking-[-0.01em]">Pacienti</h1>
           <p className="mt-1 text-ink-600">Prehľad pacientov a stavu ich vyšetrení na jednom mieste.</p>
         </div>
-        <Button variant="primary" onClick={() => setAdding(true)}><Plus size={18} /> Pridať pacienta</Button>
+        {role === 'vojtech' && <Button variant="primary" onClick={() => setAdding(true)}><Plus size={18} /> Pridať pacienta</Button>}
       </div>
 
       {/* My work – role-based queues; click = show the queue across all patients */}
@@ -361,45 +403,26 @@ export default function PatientList() {
 
       {/* List card */}
       <div className="rounded-card bg-surface p-6">
-        <div className="flex items-center justify-between gap-4">
-          <Segmented<Tab>
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: 'mine', label: 'Moji', count: PATIENTS.filter((p) => p.owner === role).length },
-              { value: 'shared', label: 'Zdieľaní so mnou', count: PATIENTS.filter((p) => p.sharedWith.includes(role)).length },
-              { value: 'all', label: 'Všetci', count: PATIENTS.length },
-            ]}
-          />
+        {/* Search + filters */}
+        <div className="flex flex-wrap items-center gap-2">
           <SearchBox value={input} onAsk={ask} onChange={(v) => { setInput(v); if (!v) setAiResult(null) }} />
-        </div>
-
-        {/* Filters */}
-        <div className="mt-4 flex flex-wrap items-center gap-2">
           <FilterMenu label="Stav" multi options={STATUS_OPTIONS} selected={filters.statuses} ai={ai('statuses')}
             onChange={(v) => setFilter('statuses', v)} count={(v) => facet('statuses', [v])} />
           <FilterMenu label="Typ defektu" multi options={DEFECT_OPTIONS} selected={filters.defects} ai={ai('defects')}
             onChange={(v) => setFilter('defects', v)} count={(v) => facet('defects', [v])} />
-          {tab === 'shared' && (
-            <FilterMenu label="Zdieľal" multi options={SHARER_OPTIONS.filter((o) => o.value !== role)} selected={filters.sharedBy}
-              onChange={(v) => setFilter('sharedBy', v)} count={(v) => facet('sharedBy', [v])} />
-          )}
-          <AdvancedFilters patients={inTab} filters={filters} onChange={setFilter} resultCount={rows.length} />
+          <AdvancedFilters patients={PATIENTS} filters={filters} onChange={setFilter} resultCount={rows.length} />
+          {/* Active filters without their own control, as removable chips – in the same row, after the controls,
+              so the buttons (and the open popover) stay put and no extra row pushes the table down. */}
+          {chipActive.length > 0 && <span className="mx-1 h-5 border-l border-border" />}
+          {chipActive.map((k) => (
+            <button key={k} className={chipClass(true, ai(k))} onClick={() => setFilter(k, EMPTY_FILTERS[k])}>
+              {ai(k) && <Sparkles size={14} />} {describe(k, filters)} <X size={14} className="opacity-70" />
+            </button>
+          ))}
           {hasFilters && (
             <Button size="sm" variant="ghost" onClick={clearAll}>Zrušiť všetko</Button>
           )}
         </div>
-
-        {/* Active filters without their own control in the bar, as readable removable chips */}
-        {chipActive.length > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {chipActive.map((k) => (
-              <button key={k} className={chipClass(true, ai(k))} onClick={() => setFilter(k, EMPTY_FILTERS[k])}>
-                {ai(k) && <Sparkles size={14} />} {describe(k, filters)} <X size={14} className="opacity-70" />
-              </button>
-            ))}
-          </div>
-        )}
 
         {(thinking || aiResult) && (
           <div className="mt-4">
@@ -407,30 +430,29 @@ export default function PatientList() {
           </div>
         )}
 
-        <p className="mt-5 text-xs text-ink-600">
-          Zobrazených <span className="num font-medium text-ink-900">{rows.length}</span> z <span className="num">{inTab.length}</span> pacientov
-        </p>
 
         {/* Table */}
         {rows.length > 0 ? (
-          <table className="mt-2 w-full border-separate border-spacing-0 text-left">
+          // With several pages, keep a full page of height so the pagination doesn't jump on the last, shorter page.
+          <div style={pageCount > 1 ? { minHeight: TABLE_HEADER_HEIGHT + PAGE_SIZE * ROW_HEIGHT } : undefined}>
+          <table className="mt-4 w-full border-separate border-spacing-0 text-left">
             <thead>
               <tr className="text-[11px] tracking-[0.06em] text-ink-400 [&>th]:h-10 [&>th]:border-b [&>th]:border-border">
                 <SortHeader label="Pacient" k="id" sort={sort} onSort={onSort} />
-                <th className="px-3 font-semibold uppercase">Stav</th>
-                <th className="px-3 font-semibold uppercase">Anamnéza</th>
+                <SortHeader label="Stav" k="status" sort={sort} onSort={onSort} />
+                <SortHeader label="Anamnéza" k="anamnesis" sort={sort} onSort={onSort} />
                 <SortHeader label="PICADAR" k="picadar" sort={sort} onSort={onSort} />
                 <SortHeader label="nNO" k="nno" sort={sort} onSort={onSort} />
-                <th className="px-3 font-semibold uppercase">HSVM</th>
-                <th className="px-3 font-semibold uppercase">TEM</th>
-                <th className="px-3 font-semibold uppercase">IF</th>
-                <th className="px-3 font-semibold uppercase">Genetika</th>
+                <SortHeader label="HSVM" k="hsvm" sort={sort} onSort={onSort} />
+                <SortHeader label="TEM" k="tem" sort={sort} onSort={onSort} />
+                <SortHeader label="IF" k="if" sort={sort} onSort={onSort} />
+                <SortHeader label="Genetika" k="genetics" sort={sort} onSort={onSort} />
                 <SortHeader label="Posledná zmena" k="lastActivity" sort={sort} onSort={onSort} />
                 <th className="w-10" />
               </tr>
             </thead>
             <tbody>
-              {rows.map((p) => {
+              {pageRows.map((p) => {
                 const idle = idleDays(p)
                 const stale = isStale(p)
                 return (
@@ -463,13 +485,13 @@ export default function PatientList() {
               })}
             </tbody>
           </table>
+          </div>
         ) : (
-          <div className="mt-2 flex flex-col items-center rounded-inner bg-surface-muted py-14 text-center">
+          <div className="mt-4 flex flex-col items-center rounded-inner bg-surface-muted py-14 text-center">
             <p className="text-[15px] font-semibold">Žiadny pacient nezodpovedá filtrom</p>
-            <p className="mt-1 text-ink-600">Skús niektorý filter zrušiť alebo prepnúť na „Všetci“.</p>
+            <p className="mt-1 text-ink-600">Skús niektorý filter zrušiť.</p>
             <div className="mt-4 flex gap-2">
               <Button size="sm" onClick={clearAll}>Zrušiť filtre</Button>
-              {tab !== 'all' && <Button size="sm" onClick={() => setTab('all')}>Zobraziť všetkých</Button>}
             </div>
           </div>
         )}
@@ -480,12 +502,12 @@ export default function PatientList() {
           <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-bad" /> Mimo normy</span>
           <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-wait" /> Čaká sa</span>
           <span className="flex items-center gap-1.5"><span className="hatch inline-block h-3 w-5 rounded-full" /> Nevykonané</span>
-          <span className="ml-auto">nNO v ppb · TEM „72/100“ = vyhodnotené riasinky z minima</span>
+          {pageCount > 1 && <Pagination className="ml-auto" page={currentPage} pageCount={pageCount} pageSize={PAGE_SIZE} total={rows.length} onChange={setPage} />}
         </div>
       </div>
       {adding && (
         <AddPatientModal onClose={() => setAdding(false)}
-          onAdded={(id) => { setAdding(false); setAdded(id); setTab('mine'); setTimeout(() => setAdded(null), 5000) }} />
+          onAdded={(id) => { setAdding(false); setAdded(id); setTimeout(() => setAdded(null), 5000) }} />
       )}
       {added && (
         <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-ink-900 py-1.5 pr-1.5 pl-5 text-[13px] text-white shadow-pop">

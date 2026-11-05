@@ -19,10 +19,10 @@ const nnoBand = (p: Patient) => {
 }
 
 const FLAGS: { label: string; get: (p: Patient) => boolean }[] = [
-  { label: 'Porucha laterality', get: (p) => p.anamnesis.situs !== 'solitus' },
-  { label: 'RDS novorodenca', get: (p) => p.anamnesis.neonatalRds },
-  { label: 'Srdcová vada', get: (p) => p.anamnesis.heartDefect },
-  { label: 'PCD v rodine', get: (p) => p.anamnesis.familyPcd },
+  { label: 'Porucha laterality', get: (p) => p.anamnesis != null && p.anamnesis.situs !== 'solitus' },
+  { label: 'RDS novorodenca', get: (p) => !!p.anamnesis?.neonatalRds },
+  { label: 'Srdcová vada', get: (p) => !!p.anamnesis?.heartDefect },
+  { label: 'PCD v rodine', get: (p) => !!p.anamnesis?.familyPcd },
 ]
 
 // Weights: TEM defect matters most, then nNO band. A shared positive finding counts more than a shared absence.
@@ -52,7 +52,8 @@ export function compare(p: Patient, q: Patient): SimilarCase {
     if (n1 === n2) { score += W_NNO; shared.push(label) } else different.push(label)
   }
 
-  for (const f of FLAGS) {
+  // Unknown anamnesis on either side → the flags cannot be compared (not counted as a shared absence).
+  if (p.anamnesis && q.anamnesis) for (const f of FLAGS) {
     const a = f.get(p)
     const b = f.get(q)
     if (a && b) { score += W_FLAG_POS; shared.push(f.label) }
@@ -159,19 +160,22 @@ const EXAM_NAMES = { nno: 'nNO', hsvm: 'HSVM', tem: 'TEM', if: 'IF', genetics: '
 
 export function secondOpinion(p: Patient, verdict: Verdict): SecondOpinion {
   const e = p.exams
-  const temDefect = e.tem.status === 'abnormal' && e.tem.defect != null && e.tem.defect !== 'normal'
-  const geneFound = e.genetics.status === 'abnormal'
-  const hallmark = temDefect || geneFound || e.if.status === 'abnormal'
+  // Only a defect on TEM counts as hallmark. Genetics alone is not a diagnostic criterion in the centre
+  // (Dominika; >50 genes) and IF is supportive – both are weighed as supportive findings.
+  // NOTE: rules are a prototype assumption – to be reviewed with Dominika.
+  const hallmark = e.tem.status === 'abnormal' && e.tem.defect != null && e.tem.defect !== 'normal'
   const nnoLow = e.nno.value != null && e.nno.value < NNO_THRESHOLD
   const nnoNormal = e.nno.value != null && !nnoLow
-  const supportive = [nnoLow, e.hsvm.status === 'abnormal', (p.picadar ?? 0) >= 5].filter(Boolean).length
+  const supportiveFlags = [nnoLow, e.hsvm.status === 'abnormal', (p.picadar ?? 0) >= 5, e.genetics.status === 'abnormal', e.if.status === 'abnormal']
+  const supportive = supportiveFlags.filter(Boolean).length
   const pending = (Object.keys(EXAM_NAMES) as (keyof typeof EXAM_NAMES)[]).filter((k) => e[k].status === 'pending')
 
   const findings: Finding[] = []
-  if (temDefect) findings.push({ text: `TEM: ${lowerFirst(DEFECT_LABEL[e.tem.defect!])}`, towards: 'pcd' })
+  if (hallmark) findings.push({ text: `TEM: ${lowerFirst(DEFECT_LABEL[e.tem.defect!])} (hallmark)`, towards: 'pcd' })
   if (e.tem.defect === 'normal' && e.tem.status === 'normal') findings.push({ text: 'TEM: normálna ultraštruktúra (u ~30 % PCD)', towards: 'notPcd' })
-  if (geneFound) findings.push({ text: `Genetika: variant v géne ${e.genetics.gene}`, towards: 'pcd' })
+  if (e.genetics.status === 'abnormal') findings.push({ text: `Genetika: variant v géne ${e.genetics.gene} (sama nestačí)`, towards: 'pcd' })
   if (e.if.status === 'abnormal') findings.push({ text: 'IF: chýbajúci proteín', towards: 'pcd' })
+  if (e.if.status === 'normal') findings.push({ text: 'IF: proteíny prítomné', towards: 'notPcd' })
   if (nnoLow) findings.push({ text: `nNO ${e.nno.value} ppb (pod hranicou ${NNO_THRESHOLD})`, towards: 'pcd' })
   if (nnoNormal) findings.push({ text: `nNO ${e.nno.value} ppb (v norme)`, towards: 'notPcd' })
   if (e.hsvm.status === 'abnormal') findings.push({ text: 'HSVM: abnormálny pohyb riasiniek', towards: 'pcd' })
@@ -180,21 +184,22 @@ export function secondOpinion(p: Patient, verdict: Verdict): SecondOpinion {
   if (pending.length) findings.push({ text: `Čaká sa: ${list(pending.map((k) => EXAM_NAMES[k]))}`, towards: 'open' })
 
   // Decision tree the "AI" walks through – also shown under "Prečo?".
+  const SUPPORTIVE = 'nízke nNO, abnormálne HSVM, PICADAR ≥ 5, variant v géne, chýbajúci proteín na IF'
   const path: string[] = []
   let leaning: Verdict
   if (hallmark) {
-    path.push('Je prítomný hallmark nález (defekt na TEM, patogénny variant alebo chýbajúci proteín na IF)? → áno')
+    path.push('Je na TEM hallmark defekt? → áno')
     leaning = 'confirmed'
   } else {
-    path.push('Je prítomný hallmark nález (defekt na TEM, patogénny variant alebo chýbajúci proteín na IF)? → nie')
+    path.push('Je na TEM hallmark defekt? → nie')
     if (supportive >= 2) {
-      path.push(`Podporné nálezy (nízke nNO, abnormálne HSVM, PICADAR ≥ 5): ${supportive} z 3 → PCD nemožno vylúčiť`)
+      path.push(`Podporné nálezy (${SUPPORTIVE}): ${supportive} z 5 → PCD nemožno vylúčiť, ale bez hallmark nálezu ani potvrdiť`)
       leaning = 'unclear'
     } else if (nnoNormal && e.hsvm.status !== 'abnormal') {
       path.push('nNO v norme a HSVM bez abnormality → PCD je málo pravdepodobná')
       leaning = 'excluded'
     } else {
-      path.push(`Podporné nálezy: ${supportive} z 3 → nedostatok podkladov`)
+      path.push(`Podporné nálezy: ${supportive} z 5 → nedostatok podkladov`)
       leaning = 'unclear'
     }
   }
@@ -207,12 +212,14 @@ export function secondOpinion(p: Patient, verdict: Verdict): SecondOpinion {
   let headline = ''
   if (verdict === 'excluded' && leaning !== 'excluded') {
     headline = hallmark
-      ? 'Záver „vylúčená PCD“ je v rozpore s hallmark nálezom.'
+      ? 'Na TEM je hallmark defekt, ktorý záveru „vylúčená PCD“ odporuje.'
       : `Pri tejto kombinácii výsledkov PCD nemožno s istotou vylúčiť.${simText}`
   } else if (verdict === 'confirmed' && !hallmark) {
-    headline = 'Potvrdenie PCD zatiaľ nemá oporu v hallmark vyšetrení (TEM defekt, genetika, IF).'
+    headline = supportive >= 2
+      ? `Potvrdenie sa opiera o ${supportive} ${supportive < 5 ? 'podporné nálezy' : 'podporných nálezov'}, hallmark defekt na TEM chýba. Môže stáť za to uviesť v zdôvodnení, čo rozhodlo.`
+      : 'Potvrdenie PCD nemá oporu ani v hallmark náleze na TEM, ani v podporných nálezoch.'
   } else if (verdict === 'unclear' && hallmark) {
-    headline = 'Prípad obsahuje hallmark nález – môže stáť za zváženie uzatvárajúceho záveru.'
+    headline = 'Na TEM je hallmark defekt. Ak prípad nechávate otvorený, môže stáť za to uviesť v zdôvodnení prečo.'
   } else if (verdict !== 'unclear' && pending.length) {
     headline = `Záver uzatvára prípad, hoci ešte čaká ${list(pending.map((k) => EXAM_NAMES[k]))}.`
   }
@@ -238,7 +245,7 @@ export function caseSummary(p: Patient): string[] {
 
   const flags = FLAGS.filter((f) => f.get(p)).map((f) => lowerFirst(f.label))
   const sentences = [
-    `Pacient vo veku ${ageOf(p)} r.${flags.length ? `, v anamnéze ${list(flags)}` : ', bez výrazných nálezov v anamnéze'}${p.picadar != null ? `; PICADAR ${p.picadar}/14` : ''}.`,
+    `Pacient vo veku ${ageOf(p)} r.${!p.anamnesis ? ', anamnéza nie je zapísaná' : flags.length ? `, v anamnéze ${list(flags)}` : ', bez výrazných nálezov v anamnéze'}${p.picadar != null ? `; PICADAR ${p.picadar}/14` : ''}.`,
   ]
   if (by('abnormal').length) sentences.push(`Mimo normy: ${list(by('abnormal'))}.`)
   if (by('normal').length) sentences.push(`V norme: ${list(by('normal'))}.`)

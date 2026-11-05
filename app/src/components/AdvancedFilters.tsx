@@ -1,5 +1,5 @@
 import { Check, SlidersHorizontal } from 'lucide-react'
-import { Button, Popover, usePopover } from './ui'
+import { Button, CountSlot, Popover, chipClass, usePopover } from './ui'
 import {
   ADVANCED_KEYS, AGE_AT_DX_OPTIONS, AGE_OPTIONS, EMPTY_FILTERS, FLAG_FILTERS, PICADAR_OPTIONS,
   activeKeys, matches, type FilterKey, type Filters,
@@ -64,12 +64,9 @@ export default function AdvancedFilters({ patients, filters, onChange, resultCou
 
   return (
     <div ref={ref} className="relative">
-      <button onClick={() => setOpen(!open)}
-        className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium transition-colors cursor-pointer ${
-          active ? 'border-ink-900 bg-ink-900 text-white' : 'border-border bg-surface hover:bg-surface-muted'
-        }`}>
+      <button onClick={() => setOpen(!open)} className={`${chipClass(active > 0, false)} pr-2.5`}>
         <SlidersHorizontal size={14} /> Ďalšie filtre
-        {active > 0 && <span className="num rounded-full bg-white px-1.5 text-[11px] font-semibold text-ink-900">{active}</span>}
+        <CountSlot n={active} />
       </button>
 
       {open && (

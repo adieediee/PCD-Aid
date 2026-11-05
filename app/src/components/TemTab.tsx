@@ -9,7 +9,7 @@ import { ROLES } from '../labels'
 import { useRole } from '../role'
 import { TemUploadModal } from './Forms'
 import { notify, recipients } from '../notifications'
-import { hasMockImages, uploadedImages, useStoreVersion } from '../store'
+import { hasMockImages, reportSent, setReportSent, uploadedImages, useStoreVersion } from '../store'
 import type { Patient } from '../types'
 
 const sectionLabel = 'text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-400'
@@ -104,8 +104,7 @@ function LowCiliaWarning({ n, pendingImages, onAddNote, noteAdded, onShowPending
 type ReportStatus = 'draft' | 'sent'
 
 function initialReport(p: Patient, draft: string): { text: string; status: ReportStatus } {
-  const finished = p.status !== 'diagnostics' && p.exams.tem.ciliaCount != null
-  return finished ? { text: draft, status: 'sent' } : { text: '', status: 'draft' }
+  return reportSent(p) ? { text: draft, status: 'sent' } : { text: '', status: 'draft' }
 }
 
 // ---------- Tab ----------
@@ -131,7 +130,8 @@ export default function TemTab({ p }: { p: Patient }) {
 
   const init = initialReport(p, aiDraftText)
   const [report, setReport] = useState(init.text)
-  const [status, setStatus] = useState<ReportStatus>(init.status)
+  const [status, setStatusState] = useState<ReportStatus>(init.status)
+  const setStatus = (s: ReportStatus) => { setStatusState(s); setReportSent(p.id, s === 'sent') }
   const [aiDraft, setAiDraft] = useState<string | null>(null)
   const [drafting, setDrafting] = useState(false)
   const [draftWhy, setDraftWhy] = useState(false)

@@ -1,4 +1,4 @@
-import type { Anamnesis, Exams, Patient, PatientStatus, RoleId, Situs, TemDefect } from '../types'
+import type { Anamnesis, ExamStatus, Exams, Patient, PatientStatus, RoleId, Situs, TemDefect } from '../types'
 
 // Fictional mock data, generated deterministically (same seed = same patients on every reload).
 
@@ -119,6 +119,11 @@ export const CLINICAL_INDEX_ITEMS: { label: string; get: (a: Anamnesis) => boole
 
 export const clinicalIndexScore = (a: Anamnesis) => CLINICAL_INDEX_ITEMS.filter((i) => i.get(a)).length
 
+export const EMPTY_ANAMNESIS: Anamnesis = {
+  situs: 'solitus', neonatalRds: false, nicu: false, heartDefect: false, familyPcd: false,
+  siblings: 0, wetCough: false, rhinitis: false, otitis: false, fullTerm: true,
+}
+
 function generate(id: string, status: PatientStatus): Patient {
   const birthYear = chance(0.7) ? between(2008, 2024) : between(1976, 2007)
   const age = TODAY.getFullYear() - birthYear
@@ -142,7 +147,10 @@ function generate(id: string, status: PatientStatus): Patient {
   const picadar = picadarScore(anamnesis)
   const clinicalIndex = clinicalIndexScore(anamnesis)
 
-  const owner = pick(ROLE_IDS)
+  // Treating clinician is always the pediatrician – only clinicians own cases and write conclusions.
+  // The lab member who handles the case gets it shared. (pick() kept so the random sequence – and all mock data – stays the same.)
+  const assignee = pick(ROLE_IDS)
+  const owner: RoleId = 'vojtech'
   const added = status === 'diagnostics' ? between(3, 90) : status === 'unclear' ? between(30, 400) : between(60, 1400)
   const idle = status === 'diagnostics' ? between(0, 30) : status === 'unclear' ? between(3, 60) : between(20, Math.min(added, 600))
 
@@ -154,15 +162,23 @@ function generate(id: string, status: PatientStatus): Patient {
     status,
     ageAtDiagnosis: status === 'confirmed' ? Math.min(age, chance(0.75) ? between(0, 12) : between(13, 40)) : null,
     owner,
-    sharedWith: (['vojtech', 'michaela', 'lucia'] as RoleId[]).filter((r) => r !== owner && chance(0.35)),
+    sharedWith: (['michaela', 'lucia'] as RoleId[]).filter((r) => chance(0.35) || r === assignee),
     addedAt: daysAgo(added),
     lastActivity: daysAgo(Math.min(idle, added)),
-    anamnesis,
-    picadar: status === 'diagnostics' && chance(0.3) ? null : picadar,
-    clinicalIndex: status === 'diagnostics' && chance(0.3) ? null : clinicalIndex,
+    ...anamnesisFields(status === 'diagnostics', anamnesis, picadar, clinicalIndex),
     exams: makeExams(status, age),
   }
 }
+
+// Some cases in diagnostics have no anamnesis transcribed (the doctor keeps it in UNIS only).
+// Draws rand() exactly like the older version (two draws, only for diagnostics) so the mock data stays the same.
+function anamnesisFields(inDiagnostics: boolean, anamnesis: Anamnesis, picadar: number | null, clinicalIndex: number) {
+  const missing = inDiagnostics && chance(0.3)
+  if (inDiagnostics) chance(0.3)
+  return missing ? { anamnesis: null, picadar: null, clinicalIndex: null } : { anamnesis, picadar, clinicalIndex }
+}
+
+const setAnamnesis = (p: Patient, patch: Partial<Anamnesis>) => { p.anamnesis = { ...(p.anamnesis ?? EMPTY_ANAMNESIS), ...patch } }
 
 // Key scenarios for testing with doctors – fixed IDs so they are easy to find.
 const KEY_IDS = ['PCD-0087', 'PCD-0118', 'PCD-0142', 'PCD-0163', 'PCD-0171']
@@ -185,7 +201,7 @@ function buildPatients(): Patient[] {
   Object.assign(p142, {
     birthYear: 2019, owner: 'vojtech', sharedWith: ['michaela'], lastActivity: daysAgo(4), addedAt: daysAgo(38)
   })
-  Object.assign(p142.anamnesis, { fullTerm: true, situs: 'solitus', neonatalRds: true, nicu: true, familyPcd: true, wetCough: true, rhinitis: true, otitis: true, heartDefect: false, siblings: 2 })
+  setAnamnesis(p142, { fullTerm: true, situs: 'solitus', neonatalRds: true, nicu: true, familyPcd: true, wetCough: true, rhinitis: true, otitis: true, heartDefect: false, siblings: 2 })
   p142.exams = {
     nno: { status: 'abnormal', value: 96 },
     hsvm: { status: 'abnormal' },
@@ -197,7 +213,7 @@ function buildPatients(): Patient[] {
   // Confirmed PCD despite normal TEM (DNAH11) – genetics arrived yesterday; similar case for PCD-0142, triggers F08 for PCD-0087.
   const p118 = generate('PCD-0118', 'confirmed')
   Object.assign(p118, { birthYear: 2016, ageAtDiagnosis: 10, owner: 'vojtech', addedAt: daysAgo(720), lastActivity: daysAgo(1) })
-  Object.assign(p118.anamnesis, { situs: 'solitus', neonatalRds: true, familyPcd: false, wetCough: true, rhinitis: true })
+  setAnamnesis(p118, { situs: 'solitus', neonatalRds: true, familyPcd: false, wetCough: true, rhinitis: true })
   p118.exams = {
     nno: { status: 'abnormal', value: 58 },
     hsvm: { status: 'abnormal' },
@@ -209,7 +225,7 @@ function buildPatients(): Patient[] {
   // Excluded in 2023 because of normal TEM – should be re-evaluated (F08).
   const p087 = generate('PCD-0087', 'excluded')
   Object.assign(p087, { birthYear: 2014, owner: 'vojtech', sharedWith: [], addedAt: daysAgo(1180), lastActivity: daysAgo(1100) })
-  Object.assign(p087.anamnesis, { situs: 'solitus', neonatalRds: true, wetCough: true, rhinitis: true })
+  setAnamnesis(p087, { situs: 'solitus', neonatalRds: true, wetCough: true, rhinitis: true })
   p087.exams = {
     nno: { status: 'abnormal', value: 162 },
     hsvm: { status: 'normal' },
@@ -220,8 +236,8 @@ function buildPatients(): Patient[] {
 
   // TEM evaluation in progress, fewer than 100 cilia (F07).
   const p163 = generate('PCD-0163', 'diagnostics')
-  Object.assign(p163, { birthYear: 2021, owner: 'michaela', sharedWith: ['vojtech', 'lucia'], lastActivity: daysAgo(1), addedAt: daysAgo(12) })
-  Object.assign(p163.anamnesis, { situs: 'inversus', neonatalRds: true })
+  Object.assign(p163, { birthYear: 2021, owner: 'vojtech', sharedWith: ['michaela', 'lucia'], lastActivity: daysAgo(1), addedAt: daysAgo(12) })
+  setAnamnesis(p163, { situs: 'inversus', neonatalRds: true })
   p163.exams = {
     nno: { status: 'abnormal', value: 44 },
     hsvm: { status: 'abnormal' },
@@ -235,15 +251,46 @@ function buildPatients(): Patient[] {
   Object.assign(p171, { owner: 'vojtech', lastActivity: daysAgo(26), addedAt: daysAgo(55) })
   p171.exams.genetics = { status: 'pending', gene: null }
 
-  // Complete unclear case – all results in, waiting for the clinician's conclusion (queue "Pripravené na záver", F06).
+  // Complete unclear case – all results in (IF normal, genetics not done), waiting for the clinician's conclusion
+  // (queue "Pripravené na záver"). No hallmark on TEM, so F06 speaks up if the doctor confirms or excludes.
   const p141 = list.find((p) => p.id === 'PCD-0141')
-  if (p141) p141.exams.if = { status: 'abnormal' }
+  if (p141) p141.exams.if = { status: 'normal' }
 
-  list.push(p142, p118, p087, p163, p171)
+  // Freshly referred by the pediatrician – anamnesis (+ nNO) only, no TEM images yet → lab can try flow 3 (upload).
+  // Built without rand() so the generated patients above stay the same.
+  const fresh = (id: string, o: { birthYear: number; added: number; sharedWith: RoleId[]; nno: Exams['nno']; hsvm: ExamStatus; anamnesis: Partial<Anamnesis> | null }): Patient => ({
+    id, sampleNo: 1, birthYear: o.birthYear, status: 'diagnostics', ageAtDiagnosis: null, owner: 'vojtech', sharedWith: o.sharedWith,
+    addedAt: daysAgo(o.added), lastActivity: daysAgo(o.added),
+    anamnesis: o.anamnesis && { ...EMPTY_ANAMNESIS, wetCough: true, ...o.anamnesis },
+    picadar: null, clinicalIndex: null,
+    exams: {
+      nno: o.nno,
+      hsvm: { status: o.hsvm },
+      tem: { status: 'notDone', defect: null, ciliaCount: null },
+      if: { status: 'notDone' },
+      genetics: { status: 'notDone', gene: null },
+    },
+  })
+  const freshPatients = [
+    // Strong suspicion: situs inversus + low nNO.
+    fresh('PCD-0172', { birthYear: 2018, added: 2, sharedWith: ['michaela', 'lucia'], nno: { status: 'abnormal', value: 38 }, hsvm: 'pending',
+      anamnesis: { situs: 'inversus', neonatalRds: true, nicu: true, rhinitis: true, otitis: true, siblings: 1 } }),
+    // Infant – nNO not reliable under 5 years, so TEM is the next step.
+    fresh('PCD-0173', { birthYear: 2025, added: 5, sharedWith: ['michaela'], nno: { status: 'notDone', value: null }, hsvm: 'notDone',
+      anamnesis: { neonatalRds: true, rhinitis: true, familyPcd: true, siblings: 2 } }),
+    // Borderline nNO, anamnesis left in UNIS – not transcribed into the app.
+    fresh('PCD-0174', { birthYear: 2012, added: 8, sharedWith: ['lucia'], nno: { status: 'normal', value: 205 }, hsvm: 'notDone',
+      anamnesis: null }),
+    // Heterotaxy with a heart defect, nNO still waiting.
+    fresh('PCD-0175', { birthYear: 2021, added: 1, sharedWith: ['michaela', 'lucia'], nno: { status: 'pending', value: null }, hsvm: 'pending',
+      anamnesis: { situs: 'ambiguus', heartDefect: true, neonatalRds: true, otitis: true } }),
+  ]
+
+  list.push(p142, p118, p087, p163, p171, ...freshPatients)
   // Key cases changed their anamnesis – keep scores consistent with it.
-  for (const p of [p142, p118, p087, p163, p171]) {
-    p.picadar = picadarScore(p.anamnesis)
-    p.clinicalIndex = clinicalIndexScore(p.anamnesis)
+  for (const p of [p142, p118, p087, p163, p171, ...freshPatients]) {
+    p.picadar = p.anamnesis && picadarScore(p.anamnesis)
+    p.clinicalIndex = p.anamnesis && clinicalIndexScore(p.anamnesis)
   }
   return list.sort((a, b) => a.id.localeCompare(b.id))
 }

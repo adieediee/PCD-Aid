@@ -1,4 +1,5 @@
-import { DEFECT_LABEL, PATIENT_STATUS, ROLES } from './labels'
+import { DEFECT_LABEL, PATIENT_STATUS } from './labels'
+import { reportSent } from './store'
 import { MIN_CILIA, NNO_THRESHOLD, PICADAR_CUTOFF, STALE_DAYS, ageOf, idleDays, isStale } from './data/patients'
 import type { Patient, PatientStatus, RoleId, TemDefect } from './types'
 
@@ -9,7 +10,6 @@ export interface Filters {
   queue: QueueId | null
   statuses: PatientStatus[]
   defects: TemDefect[]
-  sharedBy: RoleId[]
   // "Ďalšie filtre" panel – finding similar / research cases
   laterality: boolean
   rds: boolean
@@ -31,7 +31,6 @@ export const EMPTY_FILTERS: Filters = {
   queue: null,
   statuses: [],
   defects: [],
-  sharedBy: [],
   laterality: false,
   rds: false,
   heart: false,
@@ -51,8 +50,7 @@ export type QueueId = 'temToEvaluate' | 'lowCilia' | 'reportMissing' | 'readyFor
 
 const open = (p: Patient) => p.status === 'diagnostics' || p.status === 'unclear'
 const EXAMS = ['nno', 'hsvm', 'tem', 'if', 'genetics'] as const
-// Mirrors the TEM tab: a report counts as sent once the case left "V diagnostike".
-const reportMissing = (p: Patient) => p.status === 'diagnostics' && p.exams.tem.ciliaCount != null && p.exams.tem.status !== 'pending'
+const reportMissing = (p: Patient) => !reportSent(p) && p.exams.tem.ciliaCount != null && p.exams.tem.status !== 'pending'
 
 export const QUEUES: Record<QueueId, { label: string; hint: string; test: (p: Patient) => boolean }> = {
   temToEvaluate: { label: 'Snímky na vyhodnotenie', hint: 'TEM čaká na vyhodnotenie v CiliaScane', test: (p) => p.exams.tem.status === 'pending' },
@@ -62,7 +60,7 @@ export const QUEUES: Record<QueueId, { label: string; hint: string; test: (p: Pa
     label: 'Pripravené na záver', hint: 'všetky výsledky sú k dispozícii',
     test: (p) => open(p) && EXAMS.every((k) => p.exams[k].status !== 'pending') && p.exams.tem.status !== 'notDone' && !reportMissing(p),
   },
-  recent: { label: 'Zmena za posledný týždeň', hint: 'nové výsledky alebo snímky', test: (p) => open(p) && idleDays(p) <= 7 },
+  recent: { label: 'Aktivita za posledný týždeň', hint: 'posledná zmena do 7 dní', test: (p) => open(p) && idleDays(p) <= 7 },
   unclear: { label: 'Nejasné prípady', hint: 'výsledky si navzájom odporujú', test: (p) => p.status === 'unclear' },
   stale: { label: `Stojí > ${STALE_DAYS / 7} týždne`, hint: 'bez aktivity', test: isStale },
   temToPrepare: { label: 'Na prípravu TEM / IF', hint: 'vzorka čaká na laboratórium', test: (p) => open(p) && (p.exams.tem.status === 'notDone' || p.exams.if.status === 'pending') },
@@ -126,11 +124,10 @@ export function matches(p: Patient, f: Filters): boolean {
   if (f.queue && !QUEUES[f.queue].test(p)) return false
   if (f.statuses.length && !f.statuses.includes(p.status)) return false
   if (f.defects.length && !(p.exams.tem.defect && f.defects.includes(p.exams.tem.defect))) return false
-  if (f.sharedBy.length && !f.sharedBy.includes(p.owner)) return false
-  if (f.laterality && a.situs === 'solitus') return false
-  if (f.rds && !a.neonatalRds) return false
-  if (f.heart && !a.heartDefect) return false
-  if (f.family && !a.familyPcd) return false
+  if (f.laterality && (!a || a.situs === 'solitus')) return false
+  if (f.rds && !a?.neonatalRds) return false
+  if (f.heart && !a?.heartDefect) return false
+  if (f.family && !a?.familyPcd) return false
   if (f.nno) {
     const v = p.exams.nno.value
     if (v == null) return false
@@ -147,7 +144,7 @@ export function matches(p: Patient, f: Filters): boolean {
     const band = d <= 5 ? 'infant' : d < 18 ? 'child' : 'adult'
     if (band !== f.ageAtDx) return false
   }
-  if (f.siblings && (f.siblings === 'none') !== (a.siblings === 0)) return false
+  if (f.siblings && (!a || (f.siblings === 'none') !== (a.siblings === 0))) return false
   if (f.genetics === 'missing' && !['pending', 'notDone'].includes(p.exams.genetics.status)) return false
   if (f.stale && !isStale(p)) return false
   return true
@@ -162,8 +159,6 @@ export function describe(key: FilterKey, f: Filters): string | null {
       return f.statuses.length ? f.statuses.map((s) => PATIENT_STATUS[s].label).join(', ') : null
     case 'defects':
       return f.defects.length ? f.defects.map((d) => DEFECT_LABEL[d]).join(', ') : null
-    case 'sharedBy':
-      return f.sharedBy.length ? `Zdieľal: ${f.sharedBy.map((r) => ROLES[r].name).join(', ')}` : null
     case 'laterality':
     case 'rds':
     case 'heart':

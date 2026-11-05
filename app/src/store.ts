@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
-import { PATIENTS, TODAY } from './data/patients'
+import { PATIENTS, TODAY, clinicalIndexScore, picadarScore } from './data/patients'
 import type { TemImage } from './data/tem'
-import type { Patient, PatientStatus, RoleId } from './types'
+import type { Anamnesis, Patient, PatientStatus, RoleId } from './types'
 
 // In-memory edits made during a test session (lost on reload). Mutates mock data and notifies subscribers.
 
@@ -31,17 +31,13 @@ export function nextPatientId() {
 }
 
 export function addPatient(input: { id: string; sampleNo: number; birthYear: number; status: PatientStatus; owner: RoleId }) {
-  const anamnesis = {
-    situs: 'solitus' as const, neonatalRds: false, nicu: false, heartDefect: false, familyPcd: false,
-    siblings: 0, wetCough: false, rhinitis: false, otitis: false, fullTerm: true,
-  }
   const p: Patient = {
     ...input,
     ageAtDiagnosis: null,
     sharedWith: [],
     addedAt: todayIso(),
     lastActivity: todayIso(),
-    anamnesis,
+    anamnesis: null, // transcribed later from UNIS (or never)
     picadar: null,
     clinicalIndex: null,
     exams: {
@@ -54,6 +50,16 @@ export function addPatient(input: { id: string; sampleNo: number; birthYear: num
   }
   PATIENTS.push(p)
   PATIENTS.sort((a, b) => a.id.localeCompare(b.id))
+  emitChange()
+}
+
+// ---------- Anamnesis (transcribed from UNIS / questionnaire) ----------
+
+export function saveAnamnesis(p: Patient, a: Anamnesis) {
+  p.anamnesis = a
+  p.picadar = picadarScore(a)
+  p.clinicalIndex = clinicalIndexScore(a)
+  p.lastActivity = todayIso()
   emitChange()
 }
 
@@ -99,5 +105,17 @@ export const recentPatients = () => recent
 export function visitPatient(id: string) {
   if (recent[0] === id) return
   recent = [id, ...recent.filter((x) => x !== id)].slice(0, 5)
+  emitChange()
+}
+
+// ---------- TEM report sent to the clinician (shared by the TEM tab and the work queues) ----------
+
+const sentReports = new Map<string, boolean>()
+
+/** Mock default: a report exists once the case left "V diagnostike"; session sends/edits override it. */
+export const reportSent = (p: Patient) => sentReports.get(p.id) ?? (p.status !== 'diagnostics' && p.exams.tem.ciliaCount != null)
+
+export function setReportSent(id: string, sent: boolean) {
+  sentReports.set(id, sent)
   emitChange()
 }

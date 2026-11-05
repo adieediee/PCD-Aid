@@ -125,7 +125,7 @@ Nadpis stránky má vždy pod sebou jednovetový podnadpis v ink-600 (ako Donezo
 
 Všetko, čo vygenerovala AI, nesie aspoň jedno z: **✨ ikonu v ai-600**, **ai-50 pozadie**, **ai-100 obrys**. Nič iné tieto farby nepoužíva.
 
-- **AI insight karta** (hero): plná ai-600, biely text, 2–3 jemné kružnice (biele, 15 % opacity) v pozadí, vľavo hore obrysový tag „AI · Podobné prípady“, vpravo hore ↗. Text je výrok s počtom („8 z 12 podobných pacientov malo potvrdenú PCD“). Najviac jedna na obrazovku.
+- **AI tlačidlo v hlavičke:** `aiSoft` – ai-50 bg, ai-100 obrys, ✨ + text v ai-700 (rovnaký vzhľad ako AI inline karta). Plnú ai-600 nepoužívať na veľké plochy – modrá je akcent, nemá kričať.
 - **AI inline karta:** ai-50 bg, ai-100 border, ✨ + nadpis v ai-700, text ink-900. Pre upozornenia (rozpor, < 100 riasiniek).
 - **AI odpoveď** (panel/chat): pod každou je riadok akcií `Prečo?` · 👍 · 👎 · kopírovať. **„Prečo?“ je povinné** a rozbalí vysvetlenie (atribúty / podobní pacienti / rozhodovací strom).
 - **Neistota:** vždy „X z Y“ + pri malej vzorke sivá poznámka „malá vzorka (n = 5)“. Žiadne percentá s desatinnou čiarkou.

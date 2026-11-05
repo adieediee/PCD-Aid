@@ -1,15 +1,17 @@
-import { useRef, useState, type DragEvent } from 'react'
+import { useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { Check, ImagePlus, Plus, Upload, X } from 'lucide-react'
-import { Button, Field, Modal, inputClass } from './ui'
-import { NNO_THRESHOLD, PATIENTS, TODAY } from '../data/patients'
+import { Button, Field, Modal, Segmented, inputClass } from './ui'
+import {
+  CLINICAL_INDEX_ITEMS, EMPTY_ANAMNESIS, NNO_THRESHOLD, PATIENTS, PICADAR_CUTOFF, PICADAR_MAX, TODAY, clinicalIndexScore, picadarScore,
+} from '../data/patients'
 import { PATIENT_STATUS } from '../labels'
-import { addPatient, addUploadedImages, nextPatientId, recordNno } from '../store'
+import { addPatient, addUploadedImages, nextPatientId, recordNno, saveAnamnesis } from '../store'
 import { useRole } from '../role'
 import { notify, recipients } from '../notifications'
 import { ROLES } from '../labels'
-import type { Patient, PatientStatus } from '../types'
+import type { Anamnesis, Patient, PatientStatus, Situs } from '../types'
 
-// Forms following Majka's user flows: 1 add patient, 2 record nNO, 3 upload TEM images.
+// Forms following Majka's user flows: 1 add patient, 2 record nNO, 3 upload TEM images (+ anamnesis transcription).
 
 // ---------- Flow 1: Add new patient ----------
 
@@ -78,6 +80,113 @@ export function AddPatientModal({ onClose, onAdded }: { onClose: () => void; onA
           <Button type="submit" variant="primary"><Plus size={16} /> Pridať pacienta</Button>
         </div>
       </form>
+    </Modal>
+  )
+}
+
+// ---------- Anamnesis ----------
+// The pediatrician takes the anamnesis in UNIS / on a paper questionnaire; copying it here is optional.
+// Scores are computed from the answers, so the doctor sees PICADAR while filling it in.
+
+type YesNoKey = { [K in keyof Anamnesis]: Anamnesis[K] extends boolean ? K : never }[keyof Anamnesis]
+
+const ANAMNESIS_GROUPS: { title: string; items: { key: YesNoKey; label: string }[] }[] = [
+  { title: 'Novorodenecké obdobie', items: [
+    { key: 'fullTerm', label: 'Narodenie v termíne' },
+    { key: 'neonatalRds', label: 'RDS novorodenca' },
+    { key: 'nicu', label: 'Hospitalizácia na JIS' },
+  ] },
+  { title: 'Príznaky', items: [
+    { key: 'wetCough', label: 'Denný vlhký kašeľ' },
+    { key: 'rhinitis', label: 'Chronická rinitída' },
+    { key: 'otitis', label: 'Ušné / sluchové problémy' },
+  ] },
+  { title: 'Ďalšie', items: [
+    { key: 'heartDefect', label: 'Vrodená srdcová vada' },
+    { key: 'familyPcd', label: 'PCD v rodine' },
+  ] },
+]
+
+const SITUS_OPTIONS: { value: Situs; label: string }[] = [
+  { value: 'solitus', label: 'Solitus' },
+  { value: 'inversus', label: 'Inversus' },
+  { value: 'ambiguus', label: 'Heterotaxia' },
+]
+const YES_NO: { value: 'yes' | 'no'; label: string }[] = [{ value: 'yes', label: 'Áno' }, { value: 'no', label: 'Nie' }]
+
+function AnswerRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-1.5">
+      <span className="text-[13px]">{label}</span>
+      {children}
+    </div>
+  )
+}
+
+export function AnamnesisModal({ p, onClose }: { p: Patient; onClose: () => void }) {
+  const { role } = useRole()
+  const [a, setA] = useState<Anamnesis>(p.anamnesis ?? EMPTY_ANAMNESIS)
+  const [siblings, setSiblings] = useState(String(a.siblings))
+  const set = <K extends keyof Anamnesis>(key: K, value: Anamnesis[K]) => setA((x) => ({ ...x, [key]: value }))
+  const sib = Number(siblings)
+  const sibError = siblings.trim() === '' || !Number.isInteger(sib) || sib < 0 || sib > 15 ? 'Zadaj počet 0–15.' : undefined
+  const final: Anamnesis = { ...a, nicu: a.neonatalRds && a.nicu, siblings: sibError ? 0 : sib }
+  const picadar = picadarScore(final)
+
+  const submit = () => {
+    if (sibError) return
+    saveAnamnesis(p, final)
+    notify({ type: 'results', patientId: p.id, tab: 'anamnesis', to: recipients(p.sharedWith, role),
+      title: p.anamnesis ? 'Upravená anamnéza' : 'Zapísaná anamnéza', text: `PICADAR ${picadar ?? '–'} · ${ROLES[role].name}` })
+    onClose()
+  }
+
+  return (
+    <Modal title={`Anamnéza · ${p.id}`} width="max-w-2xl" onClose={onClose}
+      subtitle="Prepíš z UNIS alebo z dotazníka. Nie je povinná – bez nej sa však nevypočíta PICADAR a pacient sa neporovná s podobnými podľa anamnézy.">
+      <div className="mt-6">
+        <AnswerRow label="Poloha orgánov (situs)">
+          <Segmented<Situs> value={a.situs} options={SITUS_OPTIONS} onChange={(v) => set('situs', v)} />
+        </AnswerRow>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-5">
+        {ANAMNESIS_GROUPS.map((g) => (
+          <div key={g.title}>
+            <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-400">{g.title}</p>
+            {g.items.filter((i) => i.key !== 'nicu' || a.neonatalRds).map((i) => (
+              <AnswerRow key={i.key} label={i.label}>
+                <Segmented value={a[i.key] ? 'yes' : 'no'} options={YES_NO} onChange={(v) => set(i.key, v === 'yes')} />
+              </AnswerRow>
+            ))}
+            {g.title === 'Ďalšie' && (
+              <AnswerRow label="Počet súrodencov">
+                <input value={siblings} onChange={(e) => setSiblings(e.target.value)} inputMode="numeric" aria-invalid={!!sibError}
+                  className={`${inputClass(sibError)} num w-20 text-center`} />
+              </AnswerRow>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 flex flex-wrap gap-x-6 gap-y-1 rounded-inner bg-surface-muted px-4 py-3 text-[13px]">
+        <span>
+          PICADAR{' '}
+          {picadar != null ? (
+            <>
+              <span className="num font-semibold">{picadar}</span><span className="text-ink-400">/{PICADAR_MAX}</span>
+              {picadar >= PICADAR_CUTOFF && <span className="text-ink-600"> · ≥ {PICADAR_CUTOFF} = odporúčané ďalšie vyšetrenie</span>}
+            </>
+          ) : <span className="text-ink-600">neaplikuje sa (bez denného vlhkého kašľa)</span>}
+        </span>
+        <span>
+          Klinický index <span className="num font-semibold">{clinicalIndexScore(final)}</span><span className="text-ink-400">/{CLINICAL_INDEX_ITEMS.length}</span>
+        </span>
+      </div>
+
+      <div className="mt-5 flex justify-end gap-2 border-t border-border pt-5">
+        <Button type="button" onClick={onClose}>Zrušiť</Button>
+        <Button type="button" variant="primary" onClick={submit}><Check size={16} /> Uložiť anamnézu</Button>
+      </div>
     </Modal>
   )
 }

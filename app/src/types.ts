@@ -36,7 +36,7 @@ export interface Patient {
   sharedWith: RoleId[]
   addedAt: string
   lastActivity: string
-  anamnesis: Anamnesis
+  anamnesis: Anamnesis | null // null = not transcribed yet (the pediatrician records it in UNIS; copying it here is optional)
   picadar: number | null
   clinicalIndex: number | null
   exams: Exams
