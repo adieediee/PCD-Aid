@@ -1,65 +1,77 @@
-import { useMemo, useState } from 'react'
-import { AlertTriangle, Check, ExternalLink, RefreshCw, Send, Sparkles, Upload, X } from 'lucide-react'
-import { Button, Segmented } from './ui'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { AlertTriangle, Check, CheckCheck, ChevronDown, ExternalLink, Send, Sparkles, Upload, X } from 'lucide-react'
+import { Button, FilterMenu, Pagination, Segmented } from './ui'
 import { AiFeedback } from './AiPanel'
-import { MIN_CILIA, mulberry32 } from '../data/patients'
-import { CATEGORY_LABEL, temDetails, type TemImage } from '../data/tem'
+import TemThumb from './TemThumb'
+import { MIN_CILIA, MIN_DYNEIN_CILIA } from '../data/patients'
+import { CATEGORY_LABEL, temDetails, type TemDetails, type TemImage } from '../data/tem'
 import { LOW_CILIA_NOTE, draftReport, draftSources } from '../ai/report'
-import { ROLES } from '../labels'
+import { ROLES, formatDate } from '../labels'
 import { useRole } from '../role'
 import { TemUploadModal } from './Forms'
 import { notify, recipients } from '../notifications'
-import { hasMockImages, reportSent, setReportSent, uploadedImages, useStoreVersion } from '../store'
+import { hasMockImages, markOpened, openedImages, reportSent, setReportSent, uploadedImages, useStoreVersion } from '../store'
 import type { Patient } from '../types'
 
 const sectionLabel = 'text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-400'
 
-// ---------- Mock TEM thumbnail (9+2 axoneme cross-sections) ----------
+// ---------- Stats ----------
 
-function TemThumb({ img }: { img: TemImage }) {
-  const rand = mulberry32(img.seed)
-  const axonemes = Array.from({ length: 4 + Math.floor(rand() * 3) }, () => ({ x: 14 + rand() * 92, y: 12 + rand() * 66, r: 9 + rand() * 3 }))
-  const fid = `blur-${img.id}-${img.seed}`
+function StatTile({ label, title, value, unit, className, children }: {
+  label: string; title?: string; value: number; unit?: string; className: string; children: ReactNode
+}) {
   return (
-    <svg viewBox="0 0 120 90" className="block h-full w-full" aria-hidden>
-      <defs><filter id={fid}><feGaussianBlur stdDeviation="1.6" /></filter></defs>
-      <rect width="120" height="90" fill="#C9CBCF" />
-      <g filter={img.blurry ? `url(#${fid})` : undefined}>
-        {axonemes.map((a, i) => (
-          <g key={i}>
-            <circle cx={a.x} cy={a.y} r={a.r} fill="#B3B6BC" stroke="#6B6F78" strokeWidth="0.8" />
-            {Array.from({ length: 9 }, (_, k) => {
-              const ang = (k / 9) * Math.PI * 2
-              return <circle key={k} cx={a.x + Math.cos(ang) * a.r * 0.7} cy={a.y + Math.sin(ang) * a.r * 0.7} r={1.3} fill="#3F434B" />
-            })}
-            <circle cx={a.x - 1.4} cy={a.y} r={1.1} fill="#3F434B" />
-            <circle cx={a.x + 1.4} cy={a.y} r={1.1} fill="#3F434B" />
-          </g>
-        ))}
-      </g>
-    </svg>
+    <div title={title} className={`rounded-inner bg-surface-muted p-4 ${className}`}>
+      <p className="min-h-8 text-xs leading-4 text-ink-600">{label}</p>
+      <p className="mt-1 flex items-baseline gap-1.5">
+        <span className="num text-[28px] leading-none tracking-[-0.02em]">{value}</span>
+        {unit && <span className="text-[13px] text-ink-400">{unit}</span>}
+      </p>
+      {children}
+    </div>
   )
 }
 
-// ---------- Stats ----------
-
-function CiliaProgress({ n }: { n: number }) {
-  const segments = 10
-  const filled = Math.min(Math.floor(n / (MIN_CILIA / segments)), segments)
+/** Tile for an evaluation minimum: progress towards the required number of cilia. */
+function MinimumTile({ label, n, min }: { label: string; n: number; min: number }) {
+  const segments = 5
+  const met = n >= min
+  const filled = Math.min(Math.floor(n / (min / segments)), segments)
   return (
-    <div>
-      <div className="flex items-baseline gap-1.5">
-        <span className="num text-[40px] leading-none tracking-[-0.02em]">{n}</span>
-        <span className="text-sm text-ink-400">/ {MIN_CILIA} riasiniek</span>
-      </div>
+    <StatTile label={label} value={n} unit={`/ ${min}`} className="col-span-3 @2xl:col-span-1">
       <div className="mt-3 flex gap-1">
         {Array.from({ length: segments }, (_, i) => (
-          <span key={i} className={`h-1.5 flex-1 rounded-full ${i < filled ? (n >= MIN_CILIA ? 'bg-ink-900' : 'bg-wait') : 'bg-ink-200'}`} />
+          <span key={i} className={`h-1.5 flex-1 rounded-full ${i < filled ? (met ? 'bg-ink-900' : 'bg-wait') : 'bg-ink-200'}`} />
         ))}
       </div>
-      <p className={`mt-2 text-xs ${n >= MIN_CILIA ? 'text-ink-600' : 'font-medium text-wait'}`}>
-        {n >= MIN_CILIA ? 'Minimum na vyhodnotenie splnené' : `Do minima chýba ${MIN_CILIA - n} riasiniek`}
-      </p>
+    </StatTile>
+  )
+}
+
+function DefectTile({ label, title, n, total }: { label: string; title: string; n: number; total: number }) {
+  return (
+    <StatTile label={label} title={title} value={n} className="col-span-2 @2xl:col-span-1">
+      <p className="mt-3 text-xs text-ink-600">{Math.round((n / total) * 100)} % riasiniek</p>
+    </StatTile>
+  )
+}
+
+function Distribution({ summary, interim }: { summary: TemDetails['summary']; interim: boolean }) {
+  // Only classified cilia count here; non-evaluable ones are left out.
+  const normalPct = Math.round((summary.normal / (summary.normal + summary.defective)) * 100)
+  const parts = [
+    { key: 'normal', n: summary.normal, bar: 'bg-ok' },
+    { key: 'defective', n: summary.defective, bar: 'bg-bad' },
+  ].filter((part) => part.n > 0)
+  return (
+    <div className="mt-4">
+      <div className="flex items-baseline justify-between gap-4">
+        <span className="text-[13px] text-ink-600">Celkové rozdelenie{interim ? ' (priebežné)' : ''}</span>
+        <span className="num text-[13px]">{normalPct} % normálne / {100 - normalPct} % defektné</span>
+      </div>
+      <div className="mt-2 flex h-2.5 gap-1">
+        {parts.map((part) => <span key={part.key} className={`rounded-full ${part.bar}`} style={{ flexGrow: part.n, flexBasis: 0 }} />)}
+      </div>
     </div>
   )
 }
@@ -109,7 +121,21 @@ function initialReport(p: Patient, draft: string): { text: string; status: Repor
 
 // ---------- Tab ----------
 
-type ImageFilter = 'all' | 'evaluated' | 'pending'
+type ImageFilter = 'all' | 'pending' | 'evaluated'
+type ImageQuality = 'blurry' | 'sharp'
+
+/** "1 snímku / 3 snímky / 11 snímok" (accusative, as in "Otvoriť …"). */
+function imagesLabel(n: number) {
+  if (n === 1) return '1 snímku'
+  return n >= 2 && n <= 4 ? `${n} snímky` : `${n} snímok`
+}
+
+const IMAGE_PAGE_SIZE = 12 // 3 rows of 4
+
+const QUALITY_OPTIONS: { value: ImageQuality; label: string }[] = [
+  { value: 'blurry', label: 'Rozmazané' },
+  { value: 'sharp', label: 'Ostré' },
+]
 
 export default function TemTab({ p }: { p: Patient }) {
   const { role } = useRole()
@@ -126,6 +152,9 @@ export default function TemTab({ p }: { p: Patient }) {
 
   const [selected, setSelected] = useState<string[]>([])
   const [imageFilter, setImageFilter] = useState<ImageFilter>('all')
+  const [quality, setQuality] = useState<ImageQuality[]>([])
+  const [imagePage, setImagePage] = useState(1)
+  const [fullStats, setFullStats] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
 
   const init = initialReport(p, aiDraftText)
@@ -138,9 +167,30 @@ export default function TemTab({ p }: { p: Patient }) {
 
   const n = details.evaluated
   const pendingImages = details.images.filter((i) => !i.evaluated).length
-  const images = details.images.filter((i) => imageFilter === 'all' || (imageFilter === 'evaluated' ? i.evaluated : !i.evaluated))
   const noteAdded = report.includes(LOW_CILIA_NOTE(n)) || (aiDraft?.includes(LOW_CILIA_NOTE(n)) ?? false)
   const maxCount = Math.max(...details.counts.map((c) => c.n), 1)
+  const opened = openedImages(p.id)
+  const candidates = details.images.filter((i) => !i.evaluated && !opened.includes(i.id))
+  const project = `${p.id} · odber ${p.sampleNo}`
+  const projectExists = details.images.length > candidates.length
+
+  // Gallery: status filter + quality filter + sort, then one page of the result.
+  const isOpened = (i: TemImage) => !i.evaluated && opened.includes(i.id)
+  const qualityOf = (i: TemImage): ImageQuality => (i.blurry ? 'blurry' : 'sharp')
+  const matchesStatus = (i: TemImage) => imageFilter === 'all' || i.evaluated === (imageFilter === 'evaluated')
+  const matchesQuality = (i: TemImage) => quality.length === 0 || quality.includes(qualityOf(i))
+  const images = details.images
+    .filter((i) => matchesStatus(i) && matchesQuality(i))
+    .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt) || a.id.localeCompare(b.id)) // always newest first
+  const imagePageCount = Math.max(1, Math.ceil(images.length / IMAGE_PAGE_SIZE))
+  const currentImagePage = Math.min(imagePage, imagePageCount)
+  const pageImages = images.slice((currentImagePage - 1) * IMAGE_PAGE_SIZE, currentImagePage * IMAGE_PAGE_SIZE)
+  useEffect(() => setImagePage(1), [imageFilter, quality])
+  const allVisibleSelected = images.length > 0 && images.every((i) => selected.includes(i.id))
+  const toggleAllVisible = () => {
+    const ids = images.map((i) => i.id) // every filtered image, not only the current page
+    setSelected((s) => (allVisibleSelected ? s.filter((id) => !ids.includes(id)) : [...new Set([...s, ...ids])]))
+  }
 
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 2500) }
   const toggle = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
@@ -150,27 +200,58 @@ export default function TemTab({ p }: { p: Patient }) {
     setTimeout(() => { setAiDraft(aiDraftText); setDrafting(false) }, 900)
   }
   const acceptDraft = () => { setReport(aiDraft ?? ''); setAiDraft(null); setDraftWhy(false) }
+  const openImages = (ids: string[]) => {
+    const fresh = ids.filter((id) => candidates.some((i) => i.id === id)) // images already in the project are not added twice
+    if (fresh.length > 0) markOpened(p, fresh)
+    setSelected([])
+    if (fresh.length === 0) flash(`Otváram projekt ${project} v CiliaScane… (simulácia)`)
+    else if (projectExists) flash(`Pridávam ${imagesLabel(fresh.length)} do projektu ${project}… (simulácia)`)
+    else flash(`Otváram ${imagesLabel(fresh.length)} v novom projekte ${project}… (simulácia)`)
+  }
+  const pickManually = () => {
+    setImageFilter('pending')
+    setQuality([])
+    document.getElementById('tem-images')?.scrollIntoView({ behavior: 'smooth' })
+  }
   const addNote = () => {
     if (aiDraft != null) setAiDraft(`${aiDraft.trimEnd()}\n\n${LOW_CILIA_NOTE(n)}`)
     else setReport((r) => `${r.trimEnd()}${r.trim() ? '\n\n' : ''}${LOW_CILIA_NOTE(n)}`)
   }
 
+  const worthOpening = candidates.some((i) => !i.blurry) // only blurry images left → no longer the main action
+  const openButton = canEdit && details.images.length > 0 && (
+    <Button size="sm" variant={worthOpening ? 'primary' : 'secondary'} onClick={() => openImages(details.images.map((i) => i.id))}>
+      <ExternalLink size={14} /> Otvoriť všetky v CiliaScan
+      <span className={`num rounded-full px-1.5 text-[11px] leading-[18px] ${worthOpening ? 'bg-white/15' : 'bg-surface-muted'}`}>{details.images.length}</span>
+    </Button>
+  )
+
   return (
     <div className="flex flex-col gap-6">
       {/* CiliaScan stats */}
       <section>
-        <div className="flex items-center justify-between">
-          <p className={sectionLabel}>Štatistiky z CiliaScanu</p>
-          <span className="flex items-center gap-1.5 text-xs text-ink-400"><RefreshCw size={12} /> synchronizované {details.syncedAt}</span>
-        </div>
+        <p className={sectionLabel}>Štatistiky z CiliaScanu</p>
         {n === 0 ? (
           <div className="hatch mt-3 rounded-inner p-6 text-center">
             <span className="rounded-md bg-surface px-3 py-1.5 text-[13px]">Snímky zatiaľ neboli vyhodnotené v CiliaScane</span>
           </div>
         ) : (
-          <div className="mt-3 grid grid-cols-[220px_1fr] gap-8">
-            <CiliaProgress n={n} />
-            <div className="space-y-2.5">
+          <div className="@container mt-3">
+            {/* 2 + 3 tiles when the AI panel narrows the tab, one row otherwise */}
+            <div className="grid grid-cols-6 gap-3 @2xl:grid-cols-5">
+              <MinimumTile label="Riasinky spolu" n={n} min={MIN_CILIA} />
+              <MinimumTile label="S dyneínovými ramienkami" n={details.summary.dynein} min={MIN_DYNEIN_CILIA} />
+              <DefectTile label="MTD" title="Mikrotubulárna dezorganizácia" n={details.summary.mtd} total={n} />
+              <DefectTile label="IDA" title="Defekt vnútorných dyneínových ramienok (inner dynein arm)" n={details.summary.ida} total={n} />
+              <DefectTile label="ODA" title="Defekt vonkajších dyneínových ramienok (outer dynein arm)" n={details.summary.oda} total={n} />
+            </div>
+            <Distribution summary={details.summary} interim={p.exams.tem.status === 'pending'} />
+            <div className="mt-2 flex justify-end">
+              <Button size="sm" variant="ghost" aria-expanded={fullStats} onClick={() => setFullStats(!fullStats)}>
+                <ChevronDown size={14} className={fullStats ? 'rotate-180' : ''} /> {fullStats ? 'Skryť celé štatistiky' : 'Zobraziť celé štatistiky'}
+              </Button>
+            </div>
+            {fullStats && <div className="mt-2 space-y-2.5">
               {details.counts.map((c) => (
                 <div key={c.category} className="grid grid-cols-[1fr_auto] items-center gap-x-3">
                   <span className="text-[13px]">{CATEGORY_LABEL[c.category]}</span>
@@ -180,14 +261,14 @@ export default function TemTab({ p }: { p: Patient }) {
                   </div>
                 </div>
               ))}
-            </div>
+            </div>}
           </div>
         )}
       </section>
 
       {n > 0 && n < MIN_CILIA && canEdit && (
         <LowCiliaWarning n={n} pendingImages={pendingImages} noteAdded={noteAdded} onAddNote={addNote}
-          onShowPending={() => { setImageFilter('pending'); document.getElementById('tem-images')?.scrollIntoView({ behavior: 'smooth' }) }} />
+          onShowPending={pickManually} />
       )}
 
       {/* Report */}
@@ -195,12 +276,10 @@ export default function TemTab({ p }: { p: Patient }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <p className={sectionLabel}>Správa z TEM</p>
-            {status === 'sent'
-              ? <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-ok-bg px-2.5 text-xs font-medium text-ok"><Check size={12} /> Odoslané – {ROLES[p.owner].name}</span>
-              : <span className="inline-flex h-6 items-center rounded-full border border-border px-2.5 text-xs font-medium text-ink-600">Rozpracované</span>}
+            {status === 'draft' && <span className="inline-flex h-6 items-center rounded-full border border-border px-2.5 text-xs font-medium text-ink-600">Rozpracované</span>}
           </div>
           {canEdit && status === 'draft' && aiDraft == null && n > 0 && (
-            <Button size="sm" variant="ai" onClick={suggest} disabled={drafting}>
+            <Button size="sm" variant="aiSoft" onClick={suggest} disabled={drafting}>
               <Sparkles size={14} className={drafting ? 'animate-pulse' : ''} /> {drafting ? 'Pripravujem návrh…' : 'Navrhnúť správu'}
             </Button>
           )}
@@ -243,7 +322,7 @@ export default function TemTab({ p }: { p: Patient }) {
           <div className="mt-3 flex justify-end gap-2">
             {status === 'sent'
               ? <Button size="sm" onClick={() => setStatus('draft')}>Upraviť správu</Button>
-              : <Button size="sm" variant="primary" disabled={!report.trim()} className={!report.trim() ? 'opacity-40' : ''}
+              : <Button size="sm" variant={worthOpening ? 'secondary' : 'primary'} disabled={!report.trim()} className={!report.trim() ? 'opacity-40' : ''}
                   onClick={() => {
                     setStatus('sent')
                     notify({ type: 'report', patientId: p.id, tab: 'tem', to: recipients([p.owner, ...p.sharedWith], role), title: 'Nová správa z TEM', text: `Autor: ${ROLES[role].name} · ${ROLES[role].title}` })
@@ -256,18 +335,39 @@ export default function TemTab({ p }: { p: Patient }) {
       </section>
 
       {/* Images */}
-      <section id="tem-images" className="border-t border-border pt-6">
-        <div className="flex items-center justify-between">
-          <p className={sectionLabel}>Snímky ({details.images.length})</p>
-          <div className="flex items-center gap-2">
+      <section id="tem-images" className="@container border-t border-border pt-6">
+        {/* Title row: what to do with the images. Second row: what is shown. */}
+        <div className="flex min-h-8 items-center justify-between gap-2">
+          <p className={sectionLabel}>
+            Snímky ({images.length < details.images.length ? `${images.length} z ${details.images.length}` : details.images.length})
+          </p>
+          {canEdit && (
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => setUploading(true)}><Upload size={14} /> Nahrať snímky</Button>
+              {openButton}
+            </div>
+          )}
+        </div>
+
+        {details.images.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <Segmented<ImageFilter> value={imageFilter} onChange={setImageFilter} options={[
               { value: 'all', label: 'Všetky', count: details.images.length },
-              { value: 'evaluated', label: 'Vyhodnotené', count: details.images.length - pendingImages },
               { value: 'pending', label: 'Nevyhodnotené', count: pendingImages },
+              { value: 'evaluated', label: 'Vyhodnotené', count: details.images.length - pendingImages },
             ]} />
-            {canEdit && <Button size="sm" onClick={() => setUploading(true)}><Upload size={14} /> Nahrať snímky</Button>}
+            {canEdit && (
+              <>
+                <FilterMenu<ImageQuality> label="Kvalita" ai aiAlways multi options={QUALITY_OPTIONS} selected={quality} onChange={setQuality}
+                  count={(q) => details.images.filter((i) => matchesStatus(i) && qualityOf(i) === q).length} />
+                <Button size="sm" className={`ml-auto ${images.length === 0 ? 'opacity-40' : ''}`} disabled={images.length === 0} onClick={toggleAllVisible}>
+                  <CheckCheck size={14} /> {allVisibleSelected ? 'Zrušiť označenie' : `Označiť všetky (${images.length})`}
+                </Button>
+              </>
+            )}
           </div>
-        </div>
+        )}
+
 
         {details.images.length === 0 && (
           <div className="hatch mt-4 rounded-inner p-8 text-center">
@@ -275,44 +375,65 @@ export default function TemTab({ p }: { p: Patient }) {
           </div>
         )}
 
-        <div className="mt-4 grid grid-cols-4 gap-3">
-          {images.map((img) => {
+        <div className="relative mt-4 grid grid-cols-3 gap-3 @2xl:grid-cols-4">
+          {details.images.length > 0 && images.length === 0 && (
+            <div className="hatch absolute inset-x-0 top-0 rounded-inner p-8 text-center">
+              <span className="rounded-md bg-surface px-3 py-1.5 text-[13px]">Tomuto filtru nezodpovedá žiadna snímka</span>
+            </div>
+          )}
+          {pageImages.map((img) => {
             const isSel = selected.includes(img.id)
+            const flagged = canEdit && img.blurry && !isOpened(img)
             return (
-              <button key={img.id} onClick={() => toggle(img.id)}
-                className={`group relative overflow-hidden rounded-inner text-left cursor-pointer ${isSel ? 'ring-2 ring-ink-900 ring-offset-2' : ''}`}>
+              <button key={img.id} onClick={() => toggle(img.id)} disabled={!canEdit}
+                className={`group relative overflow-hidden rounded-inner text-left ${canEdit ? 'cursor-pointer' : ''} ${isSel ? 'ring-2 ring-ink-900 ring-offset-2' : ''}`}>
                 <div className="aspect-[4/3]"><TemThumb img={img} /></div>
-                <span className={`absolute top-2 left-2 flex size-5 items-center justify-center rounded-md border ${
-                  isSel ? 'border-ink-900 bg-ink-900 text-white' : 'border-white/80 bg-white/70 opacity-0 group-hover:opacity-100'
-                }`}>
-                  {isSel && <Check size={12} strokeWidth={3} />}
-                </span>
-                <div className="flex items-center justify-between bg-surface-muted px-2.5 py-1.5 text-[11px]">
+                {canEdit && (
+                  <span className={`absolute top-2 left-2 flex size-5 items-center justify-center rounded-md border ${
+                    isSel ? 'border-ink-900 bg-ink-900 text-white' : 'border-white/80 bg-white/70 opacity-0 group-hover:opacity-100'
+                  }`}>
+                    {isSel && <Check size={12} strokeWidth={3} />}
+                  </span>
+                )}
+                <div className="flex items-center justify-between bg-surface-muted px-2.5 pt-1.5 text-[11px]">
                   <span className="font-mono font-medium">{img.id}</span>
-                  {img.evaluated
-                    ? <span className="num text-ink-600">{img.cilia} riasiniek</span>
-                    : <span className={img.blurry ? 'text-wait' : 'text-ink-400'}>{img.blurry ? 'neostrá' : 'nevyhodnotená'}</span>}
+                  {flagged
+                    ? <span title="AI: rozmazaná – návrh ju pri otváraní v CiliaScane vynechá" className="flex items-center gap-1 text-ai-600"><Sparkles size={11} /> rozmazaná</span>
+                    : img.evaluated
+                      ? <span className="flex items-center gap-1 text-ink-600"><Check size={11} /> vyhodnotená</span>
+                      : <span className={isOpened(img) ? 'text-ink-600' : 'text-ink-400'}>{isOpened(img) ? 'v CiliaScane' : 'nevyhodnotená'}</span>}
                 </div>
+                <p className="num bg-surface-muted px-2.5 pb-1.5 text-[11px] text-ink-400">{formatDate(img.uploadedAt)}</p>
               </button>
             )
           })}
+          {/* Fixed height per patient, so filtering or paging down to a few images doesn't move the UI. */}
+          {Array.from({ length: Math.min(IMAGE_PAGE_SIZE, details.images.length) - pageImages.length }, (_, i) => (
+            <div key={i} className="invisible" aria-hidden>
+              <div className="aspect-[4/3]" />
+              <p className="px-2.5 py-1.5 text-[11px]">&nbsp;<br />&nbsp;</p>
+            </div>
+          ))}
         </div>
 
+        {details.images.length > IMAGE_PAGE_SIZE && (
+          <div className="mt-4 min-h-8">
+            {imagePageCount > 1 && (
+              <Pagination className="justify-end" page={currentImagePage} pageCount={imagePageCount} pageSize={IMAGE_PAGE_SIZE} total={images.length} onChange={setImagePage} />
+            )}
+          </div>
+        )}
+
         {/* Floating selection bar */}
-        {selected.length > 0 && (
+        {canEdit && selected.length > 0 && (
           <div className="sticky bottom-4 z-20 mx-auto mt-4 flex w-fit items-center gap-2 rounded-full bg-ink-900 py-1.5 pr-1.5 pl-5 text-white shadow-pop">
             <span className="num text-[13px] font-medium">Vybraté: {selected.length}</span>
             <span className="mx-1 h-4 w-px bg-white/20" />
             <button onClick={() => setSelected([])} className="h-8 rounded-full px-3 text-[13px] text-white/70 hover:text-white cursor-pointer">Zrušiť</button>
-            <button onClick={() => { flash(`Otváram ${selected.length} snímok v CiliaScane… (simulácia)`); setSelected([]) }}
+            <button onClick={() => openImages(selected)}
               className="inline-flex h-8 items-center gap-2 rounded-full bg-white px-4 text-[13px] font-medium text-ink-900 cursor-pointer">
-              <ExternalLink size={14} /> Otvoriť v CiliaScan
+              <ExternalLink size={14} /> Otvoriť {imagesLabel(selected.length)} v CiliaScan
             </button>
-          </div>
-        )}
-        {selected.length === 0 && details.images.length > 0 && (
-          <div className="mt-4 flex justify-center">
-            <Button onClick={() => flash('Otváram CiliaScan… (simulácia)')}><ExternalLink size={16} /> Otvoriť všetky v CiliaScan</Button>
           </div>
         )}
       </section>

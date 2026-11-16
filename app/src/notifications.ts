@@ -41,6 +41,12 @@ export const NOTIF_GROUPS: { group: NotifGroup; label: string; types: NotifType[
   { group: 'ai', label: 'AI', types: ['ai'] },
 ]
 
+// Histopathologist only evaluates images and writes the report, so a new batch of images is the only event she must act on.
+const ROLE_TYPES: Partial<Record<RoleId, NotifType[]>> = { michaela: ['images'] }
+
+/** Notification types a role can receive – also limits the settings and filter chips. */
+export const typesFor = (role: RoleId) => NOTIF_TYPES.filter((t) => ROLE_TYPES[role]?.includes(t.type) ?? true)
+
 // Prototype clock: fixed TODAY + real time elapsed since the app was loaded.
 const LOADED = Date.now()
 export const now = () => TODAY.getTime() + (Date.now() - LOADED)
@@ -157,8 +163,9 @@ export function toggleType(t: NotifType) {
 
 export function useNotifications(role: RoleId) {
   useStoreVersion()
+  const allowed = typesFor(role).map((t) => t.type)
   const visible = notifications
-    .filter((n) => n.to.includes(role) && enabled.has(n.type))
+    .filter((n) => n.to.includes(role) && enabled.has(n.type) && allowed.includes(n.type))
     .sort((a, b) => b.at - a.at)
   return {
     unread: visible.filter((n) => !read.has(n.id)),

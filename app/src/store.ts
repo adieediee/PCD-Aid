@@ -82,9 +82,10 @@ export const hasMockImages = (p: Patient) => p.exams.tem.status !== 'notDone' &&
 export function addUploadedImages(p: Patient, names: string[], startIndex: number) {
   const imgs: TemImage[] = names.map((_, i) => ({
     id: `IMG_${String(startIndex + i + 1).padStart(3, '0')}`,
+    uploadedAt: todayIso(),
     evaluated: false,
     cilia: 0,
-    blurry: false,
+    blurry: (startIndex + i + 1) % 6 === 0, // mock AI result, so the pre-selection can be tested on uploads
     seed: Date.now() + i * 101,
   }))
   uploads.set(p.id, [...uploadedImages(p.id), ...imgs])
@@ -92,6 +93,18 @@ export function addUploadedImages(p: Patient, names: string[], startIndex: numbe
     freshTem.add(p.id)
     p.exams.tem = { ...p.exams.tem, status: 'pending' }
   }
+  p.lastActivity = todayIso()
+  emitChange()
+}
+
+// ---------- Images sent to CiliaScan (simulated hand-off, one project per patient + sample) ----------
+
+const opened = new Map<string, string[]>()
+
+export const openedImages = (id: string) => opened.get(id) ?? []
+
+export function markOpened(p: Patient, ids: string[]) {
+  opened.set(p.id, [...openedImages(p.id), ...ids])
   p.lastActivity = todayIso()
   emitChange()
 }

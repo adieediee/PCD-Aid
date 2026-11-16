@@ -4,7 +4,7 @@ import { Activity, Check, CheckCheck, ChevronDown, CircleCheck, Clock, Dna, File
 import { Button, IconButton, Popover, Segmented, ToggleChip, usePopover } from '../components/ui'
 import { AiFeedback } from '../components/AiPanel'
 import {
-  NOTIF_GROUPS, NOTIF_TYPES, markRead, now, reevalDetail, relativeTime, toggleType, useNotifications,
+  NOTIF_GROUPS, markRead, now, reevalDetail, relativeTime, toggleType, typesFor, useNotifications,
   type NotifGroup, type NotifType, type Notification,
 } from '../notifications'
 import { useRole } from '../role'
@@ -23,49 +23,30 @@ function bucket(at: number) {
   return days < 1 ? 'Dnes' : days < 2 ? 'Včera' : days < 7 ? 'Tento týždeň' : 'Skôr'
 }
 
-// ---------- New (unread): prominent white cards ----------
+// ---------- One notification row: read ones keep the same shape, they only get quieter ----------
 
-function NewRow({ n }: { n: Notification }) {
+function NotificationRow({ n, unread, onExpand }: { n: Notification; unread: boolean; onExpand?: () => void }) {
   const navigate = useNavigate()
   const Icon = ICON[n.type]
+  const ai = n.type === 'ai'
+  const open = onExpand ?? (() => { if (unread) markRead([n.id]); navigate(target(n)) })
   return (
-    <div onClick={() => { markRead([n.id]); navigate(target(n)) }}
-      className="flex items-center gap-4 rounded-inner bg-surface px-4 py-3.5 transition-shadow hover:shadow-pop cursor-pointer">
-      <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-surface-muted">
+    <div onClick={open}
+      className={`flex items-center gap-4 rounded-inner px-4 py-3.5 transition-shadow hover:shadow-pop cursor-pointer ${unread ? 'bg-surface' : 'bg-surface/60 hover:bg-surface'}`}>
+      <span className={`relative flex size-10 shrink-0 items-center justify-center rounded-full bg-surface-muted ${ai ? 'text-ai-600' : unread ? '' : 'text-ink-600'}`}>
         <Icon size={18} strokeWidth={1.75} />
-        <span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-ink-900 ring-2 ring-surface" />
+        {unread && <span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-ink-900 ring-2 ring-surface" />}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="font-semibold">{n.title}</span>
-          <span className="font-mono text-xs text-ink-600">{n.patientId}</span>
+          {ai && <span className="inline-flex h-5 shrink-0 items-center rounded-full border border-ai-100 bg-ai-50 px-1.5 text-[11px] font-medium text-ai-700">AI</span>}
+          <span className={unread ? 'font-semibold' : 'font-medium'}>{n.title}</span>
+          <span className="shrink-0 font-mono text-xs text-ink-600">{n.patientId}</span>
         </div>
         <p className="mt-0.5 truncate text-[13px] text-ink-600">{n.text}</p>
       </div>
       <span className="num shrink-0 text-xs text-ink-400">{relativeTime(n.at)}</span>
-      <Button size="sm">Zobraziť</Button>
-    </div>
-  )
-}
-
-// ---------- Older (read): quiet rows on the canvas ----------
-
-function OldRow({ n, onExpand }: { n: Notification; onExpand?: () => void }) {
-  const navigate = useNavigate()
-  const Icon = ICON[n.type]
-  const ai = n.type === 'ai'
-  return (
-    <div onClick={onExpand ?? (() => navigate(target(n)))}
-      className="group flex h-12 items-center gap-3 rounded-lg px-3 text-[13px] hover:bg-surface cursor-pointer">
-      <Icon size={16} strokeWidth={1.75} className={`shrink-0 ${ai ? 'text-ai-600' : 'text-ink-400'}`} />
-      {ai && <span className="inline-flex h-5 shrink-0 items-center rounded-full border border-ai-100 bg-ai-50 px-1.5 text-[11px] font-medium text-ai-700">AI</span>}
-      <span className="shrink-0 text-ink-600">{n.title}</span>
-      <span className="shrink-0 font-mono text-xs text-ink-400">{n.patientId}</span>
-      <span className="min-w-0 flex-1 truncate text-ink-400">{n.text}</span>
-      <span className="num shrink-0 text-xs text-ink-400 group-hover:hidden">{relativeTime(n.at)}</span>
-      <span className="hidden shrink-0 items-center gap-1 text-xs font-medium text-ink-900 group-hover:inline-flex">
-        {onExpand ? <>Rozbaliť <ChevronDown size={14} /></> : 'Zobraziť'}
-      </span>
+      {onExpand && <ChevronDown size={16} aria-label="Rozbaliť" className="shrink-0 text-ink-400" />}
     </div>
   )
 }
@@ -126,7 +107,7 @@ function ReevalCard({ n, unread, onCollapse }: { n: Notification; unread: boolea
           <div className="mt-3 flex items-center justify-between">
             <div className="-ml-2"><AiFeedback why={why} onWhy={() => setWhy(!why)} /></div>
             <div className="flex gap-2">
-              <Button size="sm" onClick={() => open(`/patients/${d.candidate.id}?ai=similar`)}>Porovnať podobné</Button>
+              <Button size="sm" onClick={() => open(`/patients/${d.candidate.id}/similar`)}>Porovnať podobné</Button>
               <Button size="sm" variant="primary" onClick={() => open(`/patients/${d.candidate.id}`)}>Otvoriť {d.candidate.id}</Button>
             </div>
           </div>
@@ -138,8 +119,8 @@ function ReevalCard({ n, unread, onCollapse }: { n: Notification; unread: boolea
 
 function OldItem({ n }: { n: Notification }) {
   const [expanded, setExpanded] = useState(false)
-  if (!n.reeval) return <OldRow n={n} />
-  return expanded ? <ReevalCard n={n} unread={false} onCollapse={() => setExpanded(false)} /> : <OldRow n={n} onExpand={() => setExpanded(true)} />
+  if (!n.reeval) return <NotificationRow n={n} unread={false} />
+  return expanded ? <ReevalCard n={n} unread={false} onCollapse={() => setExpanded(false)} /> : <NotificationRow n={n} unread={false} onExpand={() => setExpanded(true)} />
 }
 
 // ---------- Preferences (what I receive) behind the gear ----------
@@ -157,7 +138,7 @@ function SettingsMenu() {
         <Popover className="right-0 w-72 p-3">
           <p className="px-1 text-[13px] font-semibold">Dostávať notifikácie o</p>
           <div className="mt-2 flex flex-col">
-            {NOTIF_TYPES.map(({ type, label }) => {
+            {typesFor(role).map(({ type, label }) => {
               const on = enabled.has(type)
               const Icon = ICON[type]
               return (
@@ -172,7 +153,7 @@ function SettingsMenu() {
               )
             })}
           </div>
-          <p className="mt-2 border-t border-border px-1 pt-2 text-xs text-ink-600">Týka sa vašich a zdieľaných pacientov.</p>
+          <p className="mt-2 border-t border-border px-1 pt-2 text-xs text-ink-600">Týka sa vašich pacientov.</p>
         </Popover>
       )}
     </div>
@@ -187,7 +168,13 @@ export default function Notifications() {
   const { role } = useRole()
   const { unread, older } = useNotifications(role)
   const [view, setView] = useState<View>('all')
-  const [group, setGroup] = useState<NotifGroup | null>(null)
+  const [selectedGroup, setGroup] = useState<NotifGroup | null>(null)
+
+  // Only groups this role can receive; a single group needs no filter.
+  const allowed = typesFor(role).map((t) => t.type)
+  const groups = NOTIF_GROUPS.filter((g) => g.types.some((t) => allowed.includes(t)))
+  const filterable = groups.length > 1
+  const group = filterable && groups.some((g) => g.group === selectedGroup) ? selectedGroup : null
 
   const inGroup = (n: Notification) => !group || NOTIF_GROUPS.find((g) => g.group === group)!.types.includes(n.type)
   const shownNew = unread.filter(inGroup)
@@ -199,7 +186,6 @@ export default function Notifications() {
       <div className="flex items-end justify-between px-1 pt-2">
         <div>
           <h1 className="text-[28px] font-semibold tracking-[-0.01em]">Notifikácie</h1>
-          <p className="mt-1 text-ink-600">Nové výsledky, snímky a prípady, ktoré čakajú na vás.</p>
         </div>
         <div className="flex items-center gap-2">
           {unread.length > 0 && <Button onClick={() => markRead(unread.map((n) => n.id))}><CheckCheck size={16} /> Označiť ako prečítané</Button>}
@@ -213,8 +199,8 @@ export default function Notifications() {
           { value: 'all', label: 'Všetky' },
           { value: 'unread', label: 'Neprečítané', count: unread.length },
         ]} />
-        <span className="mx-1 h-6 w-px bg-border" />
-        {NOTIF_GROUPS.map((g) => (
+        {filterable && <span className="mx-1 h-6 w-px bg-border" />}
+        {filterable && groups.map((g) => (
           <ToggleChip key={g.group} label={g.label} ai={g.group === 'ai'} active={group === g.group}
             onClick={() => setGroup(group === g.group ? null : g.group)} />
         ))}
@@ -224,15 +210,15 @@ export default function Notifications() {
         <section className="mt-2">
           <p className={`${sectionLabel} mb-2 px-1`}>Nové <span className="num">({shownNew.length})</span></p>
           <div className="flex flex-col gap-2">
-            {shownNew.map((n) => (n.reeval ? <ReevalCard key={n.id} n={n} unread /> : <NewRow key={n.id} n={n} />))}
+            {shownNew.map((n) => (n.reeval ? <ReevalCard key={n.id} n={n} unread /> : <NotificationRow key={n.id} n={n} unread />))}
           </div>
         </section>
       )}
 
       {buckets.map((b) => (
         <section key={b} className="mt-2">
-          <p className={`${sectionLabel} mb-1 px-3`}>{b}</p>
-          <div className="flex flex-col">
+          <p className={`${sectionLabel} mb-2 px-1`}>{b}</p>
+          <div className="flex flex-col gap-2">
             {shownOld.filter((n) => bucket(n.at) === b).map((n) => <OldItem key={n.id} n={n} />)}
           </div>
         </section>

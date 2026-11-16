@@ -21,7 +21,7 @@ export function Button({
   return (
     <button
       className={cx(
-        'inline-flex shrink-0 items-center justify-center gap-2 rounded-full font-medium transition-colors cursor-pointer',
+        'inline-flex shrink-0 items-center justify-center gap-2 rounded-full font-medium whitespace-nowrap transition-colors cursor-pointer',
         size === 'md' ? 'h-10 px-5 text-sm' : 'h-8 px-3.5 text-[13px]',
         BUTTON[variant],
         className,
@@ -248,13 +248,15 @@ export function CountSlot({ n, ai = false }: { n: number; ai?: boolean }) {
 }
 
 export function FilterMenu<V extends string>({
-  label, options, selected, multi = false, ai = false, onChange, count,
+  label, options, selected, multi = false, ai = false, aiAlways = false, onChange, count,
 }: {
   label: string
   options: readonly { value: V; label: string }[]
   selected: V[]
   multi?: boolean
   ai?: boolean
+  /** The filter itself is an AI feature: keep the AI look even with nothing selected. */
+  aiAlways?: boolean
   onChange: (v: V[]) => void
   /** Optional facet count per option – how many patients the option would show. */
   count?: (v: V) => number
@@ -270,8 +272,8 @@ export function FilterMenu<V extends string>({
   return (
     <div ref={ref} className="relative">
       {/* Label stays the same and the count takes the chevron's slot, so picking options doesn't move the bar. */}
-      <button className={cx(chipClass(active, ai), 'pr-2.5')} onClick={() => setOpen(!open)} title={active ? `${label}: ${picked}` : undefined}>
-        {active && ai && <Sparkles size={14} />}
+      <button className={cx(chipClass(active || aiAlways, ai), 'pr-2.5')} onClick={() => setOpen(!open)} title={active ? `${label}: ${picked}` : undefined}>
+        {(active || aiAlways) && ai && <Sparkles size={14} />}
         {label}
         <CountSlot n={selected.length} ai={ai} />
       </button>

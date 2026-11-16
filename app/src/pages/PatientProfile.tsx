@@ -1,14 +1,15 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Check, Minus, PenLine, Share2, Sparkles } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, Clock, Minus, PenLine, Share2, Sparkles } from 'lucide-react'
 import { Button, ExamPill, PatientStatusPill, Segmented } from '../components/ui'
 import AiPanel, { AiFeedback } from '../components/AiPanel'
 import TemTab from '../components/TemTab'
+import { Fact, PatientFacts } from '../components/PatientFacts'
 import {
-  CLINICAL_INDEX_ITEMS, MIN_CILIA, NNO_THRESHOLD, PATIENTS, PICADAR_CUTOFF, PICADAR_ITEMS, PICADAR_MAX, ageOf, idleDays,
+  CLINICAL_INDEX_ITEMS, MIN_CILIA, NNO_THRESHOLD, PATIENTS, PICADAR_CUTOFF, PICADAR_ITEMS, PICADAR_MAX, idleDays, isStale,
 } from '../data/patients'
 import { caseSummary, findConflicts, type Conflict } from '../ai/engine'
-import { DEFECT_LABEL, EXAM_STATUS, ROLES } from '../labels'
+import { EXAM_STATUS, ROLES, formatDate } from '../labels'
 import { useConclusion, type Conclusion as ConclusionData } from '../conclusions'
 import { AnamnesisModal, NnoForm } from '../components/Forms'
 import { useStoreVersion, visitPatient } from '../store'
@@ -21,24 +22,11 @@ const label = (text: string) => (
   <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-400">{text}</p>
 )
 
-function formatDate(iso: string) {
-  const [y, m, d] = iso.split('-').map(Number)
-  return `${d}. ${m}. ${y}`
-}
-
 function examStatus(p: Patient, tab: TabId): ExamStatus | null {
   return tab === 'anamnesis' ? null : p.exams[tab].status
 }
 
 // ---------- Header ----------
-
-function Avatar({ initials, title }: { initials: string; title: string }) {
-  return (
-    <span title={title} className="flex size-8 items-center justify-center rounded-full border-2 border-surface bg-ink-900 text-[11px] font-semibold text-white">
-      {initials}
-    </span>
-  )
-}
 
 function ConclusionButton({ p }: { p: Patient }) {
   const { role } = useRole()
@@ -52,41 +40,30 @@ function ConclusionButton({ p }: { p: Patient }) {
   )
 }
 
-function Header({ p, aiOpen, onAi }: { p: Patient; aiOpen: boolean; onAi: () => void }) {
+function Header({ p }: { p: Patient }) {
   return (
     <div className="rounded-card bg-surface p-6">
-      <div className="flex items-start justify-between gap-6">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="font-mono text-[28px] font-semibold tracking-[-0.01em]">{p.id}</h1>
+      <div className="flex items-center justify-between gap-6">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 className="font-mono text-[28px] font-semibold tracking-[-0.01em] whitespace-nowrap">{p.id}</h1>
             <PatientStatusPill status={p.status} />
+            {isStale(p) && (
+              <span className="num inline-flex h-6 items-center gap-1.5 rounded-full bg-wait-bg px-2.5 text-xs font-medium whitespace-nowrap text-wait">
+                <Clock size={12} /> Stojí {idleDays(p)} dní
+              </span>
+            )}
           </div>
-          <p className="num mt-1.5 text-ink-600">
-            Odber {p.sampleNo} · nar. {p.birthYear} ({ageOf(p)} r.) · pridaný {formatDate(p.addedAt)} · posledná zmena pred {idleDays(p)} d
-          </p>
+          <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1">
+            <PatientFacts p={p} />
+            <Fact label="Ošetrujúci" title={ROLES[p.owner].title}>{ROLES[p.owner].name}</Fact>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <Button><Share2 size={16} /> Zdieľať</Button>
-          {!aiOpen && <Button variant="aiSoft" onClick={onAi}><Sparkles size={16} /> Podobné prípady</Button>}
+          <Link to={`/patients/${p.id}/similar`}><Button variant="aiSoft"><Sparkles size={16} /> Podobné prípady</Button></Link>
           <ConclusionButton p={p} />
         </div>
-      </div>
-      <div className="mt-5 flex items-center gap-6 border-t border-border pt-4 text-[13px]">
-        <div className="flex items-center gap-2.5">
-          <span className="text-ink-600">Ošetrujúci</span>
-          <Avatar initials={ROLES[p.owner].initials} title={ROLES[p.owner].name} />
-          <span className="font-medium">{ROLES[p.owner].name}</span>
-          <span className="text-ink-400">· {ROLES[p.owner].title}</span>
-        </div>
-        {p.sharedWith.length > 0 && (
-          <div className="flex items-center gap-2.5">
-            <span className="text-ink-600">Zdieľané s</span>
-            <div className="flex -space-x-2">
-              {p.sharedWith.map((r) => <Avatar key={r} initials={ROLES[r].initials} title={`${ROLES[r].name} · ${ROLES[r].title}`} />)}
-            </div>
-            <span className="text-ink-600">{p.sharedWith.map((r) => ROLES[r].name).join(', ')}</span>
-          </div>
-        )}
       </div>
     </div>
   )
@@ -94,42 +71,31 @@ function Header({ p, aiOpen, onAi }: { p: Patient; aiOpen: boolean; onAi: () => 
 
 // ---------- Exam overview cards ----------
 
-function NnoBar({ value }: { value: number }) {
-  const max = 600
-  return (
-    <div className="relative mt-3 h-2 rounded-full bg-surface-muted">
-      <div className={`h-2 rounded-full ${value < NNO_THRESHOLD ? 'bg-bad' : 'bg-ok'}`} style={{ width: `${Math.min(value / max, 1) * 100}%` }} />
-      <div className="absolute -top-1 h-4 border-l border-dashed border-ink-900" style={{ left: `${(NNO_THRESHOLD / max) * 100}%` }} />
-    </div>
-  )
-}
-
 function ExamCard({
-  name, status, value, unit, detail, active, onClick, children,
+  name, status, hideStatus, value, unit, detail, active, onClick,
 }: {
-  name: string; status: ExamStatus; value?: string; unit?: string; detail?: string; active: boolean; onClick: () => void; children?: ReactNode
+  name: string; status: ExamStatus; hideStatus?: boolean; value?: string; unit?: string; detail?: string; active: boolean; onClick: () => void
 }) {
   const notDone = status === 'notDone'
   return (
     <button
       onClick={onClick}
-      className={`flex min-h-[148px] flex-col rounded-card p-5 text-left transition-shadow cursor-pointer ${notDone ? 'hatch bg-surface/60' : 'bg-surface'} ${
+      className={`flex flex-col rounded-card px-5 py-3 text-left transition-shadow cursor-pointer ${notDone ? 'hatch bg-surface/60' : 'bg-surface'} ${
         active ? 'ring-2 ring-ink-900 ring-offset-2 ring-offset-canvas' : 'hover:shadow-pop'
       }`}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex min-h-6 items-center justify-between">
         <span className="text-[15px] font-medium text-ink-600">{name}</span>
         {notDone
           ? <span className="rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-ink-600">Nevykonané</span>
-          : <ExamPill status={status} text={EXAM_STATUS[status].label} />}
+          : !hideStatus && <ExamPill status={status} text={EXAM_STATUS[status].label} />}
       </div>
       {value && (
-        <p className="num mt-3 text-[28px] leading-none font-normal tracking-[-0.02em]">
-          {value}{unit && <span className="ml-1 text-sm text-ink-400">{unit}</span>}
+        <p className="num mt-2 text-[22px] leading-none font-normal tracking-[-0.02em]">
+          {value}{unit && <span className="ml-1 text-xs tracking-normal whitespace-nowrap text-ink-400">{unit}</span>}
         </p>
       )}
-      {detail && <p className="mt-2 text-xs text-ink-600">{detail}</p>}
-      {children}
+      {detail && <p className="mt-1.5 text-xs text-ink-600">{detail}</p>}
     </button>
   )
 }
@@ -141,21 +107,21 @@ function ExamOverview({ p, tab, setTab }: { p: Patient; tab: TabId; setTab: (t: 
     <div className="grid grid-cols-5 gap-4">
       <ExamCard name="nNO" status={e.nno.status} active={tab === 'nno'} onClick={() => setTab('nno')}
         value={e.nno.value != null ? String(e.nno.value) : undefined} unit="ppb"
-        detail={e.nno.value != null ? `hranica ${NNO_THRESHOLD} ppb` : e.nno.status === 'pending' ? 'meranie naplánované' : undefined}>
-        {e.nno.value != null && <NnoBar value={e.nno.value} />}
-      </ExamCard>
+        detail={e.nno.status === 'pending' ? 'meranie naplánované' : undefined} />
       <ExamCard name="HSVM" status={e.hsvm.status} active={tab === 'hsvm'} onClick={() => setTab('hsvm')}
         value={e.hsvm.status === 'abnormal' ? 'Abnormálny' : e.hsvm.status === 'normal' ? 'Normálny' : undefined}
-        detail={e.hsvm.status === 'pending' ? 'video čaká na vyhodnotenie' : e.hsvm.status !== 'notDone' ? 'pohyb riasiniek' : undefined} />
-      <ExamCard name="TEM" status={tem.status} active={tab === 'tem'} onClick={() => setTab('tem')}
-        value={tem.ciliaCount != null ? String(tem.ciliaCount) : undefined} unit={tem.ciliaCount != null ? `/ ${MIN_CILIA} riasiniek` : undefined}
-        detail={tem.defect ? `${tem.status === 'pending' ? 'predbežne: ' : ''}${DEFECT_LABEL[tem.defect]}` : tem.status === 'pending' ? 'snímky čakajú na vyhodnotenie' : undefined} />
+        detail={e.hsvm.status === 'pending' ? 'video čaká na vyhodnotenie' : undefined} />
+      {/* Finished TEM shows the finding itself; "/ 100" is only a progress target while evaluating. */}
+      <ExamCard name="TEM" status={tem.status} hideStatus={tem.status === 'normal' || tem.status === 'abnormal'} active={tab === 'tem'} onClick={() => setTab('tem')}
+        value={tem.ciliaCount != null ? String(tem.ciliaCount) : undefined}
+        unit={tem.ciliaCount == null ? undefined : tem.ciliaCount < MIN_CILIA ? `/ ${MIN_CILIA} riasiniek` : 'vyhodnotených'}
+        detail={tem.status === 'pending' && tem.ciliaCount == null ? 'snímky čakajú na vyhodnotenie' : undefined} />
       <ExamCard name="IF" status={e.if.status} active={tab === 'if'} onClick={() => setTab('if')}
         value={e.if.status === 'abnormal' ? 'Chýba proteín' : e.if.status === 'normal' ? 'Proteíny OK' : undefined}
         detail={e.if.status === 'pending' ? 'vzorka v laboratóriu' : undefined} />
       <ExamCard name="Genetika" status={e.genetics.status} active={tab === 'genetics'} onClick={() => setTab('genetics')}
         value={e.genetics.gene ?? (e.genetics.status === 'normal' ? 'Negatívna' : undefined)}
-        detail={e.genetics.status === 'pending' ? 'výsledok z genetiky čaká' : e.genetics.gene ? 'patogénny variant' : undefined} />
+        detail={e.genetics.status === 'pending' ? 'výsledok z genetiky čaká' : undefined} />
     </div>
   )
 }
@@ -230,10 +196,9 @@ function AiSummary({ p }: { p: Patient }) {
   return (
     <div className="rounded-card border border-ai-100 bg-ai-50 p-5">
       <div className="flex items-center gap-2 text-[15px] font-semibold text-ai-700">
-        <Sparkles size={16} /> Súhrn prípadu
+        <Sparkles size={16} /> AI súhrn prípadu
       </div>
       <p className="mt-2 leading-relaxed text-ink-900">{caseSummary(p).join(' ')}</p>
-      <p className="mt-2 text-xs text-ink-600">Súhrn je zostavený len z údajov v profile. Nejde o diagnózu.</p>
       {conflicts.map((c) => <ConflictBlock key={c.title} c={c} />)}
     </div>
   )
@@ -436,7 +401,10 @@ const TABS: { value: TabId; label: string }[] = [
 export default function PatientProfile() {
   const { id } = useParams()
   const [params, setParams] = useSearchParams()
-  const [tab, setTab] = useState<TabId>((params.get('tab') as TabId) ?? 'anamnesis')
+  const { role } = useRole()
+  const [pickedTab, setTab] = useState<TabId | null>(params.get('tab') as TabId | null)
+  // Until a tab is picked, the histopathologist lands on her own exam.
+  const tab: TabId = pickedTab ?? (role === 'michaela' ? 'tem' : 'anamnesis')
   useStoreVersion() // re-render after in-memory edits (nNO, uploads, conclusion)
   useEffect(() => { if (id && PATIENTS.some((x) => x.id === id)) visitPatient(id) }, [id])
   // Follow ?tab= also when the profile is already open (e.g. from a notification).
@@ -463,7 +431,7 @@ export default function PatientProfile() {
           <ArrowLeft size={14} /> Pacienti
         </Link>
 
-        <Header p={p} aiOpen={aiOpen} onAi={() => setAiOpen(true)} />
+        <Header p={p} />
         <ExamOverview p={p} tab={tab} setTab={setTab} />
 
         <div className={`grid gap-4 ${aiOpen ? 'grid-cols-1' : 'grid-cols-3'}`}>

@@ -12,7 +12,7 @@ Zdroj: 3 referencie v `design/`. Čo z ktorej berieme:
 
 1. **Modrá = AI. Nič iné nie je modré.** Hlavné akcie appky sú navy (tmavá ink farba), takže AI je vždy na prvý pohľad odlíšená. (Tým sa rieši aj konflikt s Majkiným modrým akcentom: jej navy `dark-1` je u nás primárna farba.)
 2. **Plátno je sivé, obsah je v bielych kartách.** Karty nemajú tieň ani rámik, oddeľuje ich kontrast s plátnom.
-3. **Farba nesie význam, nie dekoráciu.** Zelená / červená / jantárová sú iba pre stavy vyšetrení. Všetko ostatné je neutrálne.
+3. **Farba nesie význam, nie dekoráciu.** Zelená / červená sú pre výsledky vyšetrení, „čaká sa“ je sivé (výsledok ešte nie je), jantárová znamená pozor (nejasný prípad, zaseknutý prípad, málo riasiniek). Všetko ostatné je neutrálne.
 4. **Všetko interaktívne je pill** (tlačidlá, tagy, filtre, taby, inputy). Karty majú veľký radius, vnútorné prvky stredný.
 5. **Čísla sú hrdinovia.** Kľúčová hodnota (nNO, PICADAR, počet riasiniek) je veľká, regular váha, tabulárne číslice a jednotka je menšia a sivá.
 6. **Chýbajúce dáta = šrafovanie**, nikdy prázdne miesto ani „0“.

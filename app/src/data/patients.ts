@@ -5,6 +5,7 @@ import type { Anamnesis, ExamStatus, Exams, Patient, PatientStatus, RoleId, Situ
 export const TODAY = new Date('2026-11-02T12:00:00')
 export const NNO_THRESHOLD = 180 // ppb – per Dominika, to verify
 export const MIN_CILIA = 100
+export const MIN_DYNEIN_CILIA = 50 // of the evaluated cilia, this many must be assessed for dynein arms
 export const STALE_DAYS = 21
 
 export function mulberry32(seed: number) {

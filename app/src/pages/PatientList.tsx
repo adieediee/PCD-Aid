@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  ArrowDown, ArrowRight, ArrowUp, ArrowUpRight, Clock, Ellipsis, Plus, Search, Sparkles, ThumbsDown, ThumbsUp, X,
+  ArrowDown, ArrowRight, ArrowUp, Clock, Ellipsis, Plus, Search, Sparkles, X,
 } from 'lucide-react'
+import { AiFeedback } from '../components/AiPanel'
 import {
   Button, ExamPill, FilterMenu, Pagination, PatientStatusPill, Tag, chipClass, usePopover, Popover,
 } from '../components/ui'
@@ -10,7 +11,7 @@ import { PATIENTS, MIN_CILIA, ageOf, idleDays, isStale } from '../data/patients'
 import { AddPatientModal } from '../components/Forms'
 import AdvancedFilters from '../components/AdvancedFilters'
 import { useStoreVersion } from '../store'
-import { DEFECT_LABEL, DEFECT_SHORT, PATIENT_STATUS, ROLES } from '../labels'
+import { DEFECT_LABEL, DEFECT_SHORT, PATIENT_STATUS } from '../labels'
 import {
   CHIP_KEYS, EMPTY_FILTERS, QUEUES, ROLE_QUEUES, type QueueId,
   activeKeys, describe, idDigits, isIdQuery, matches, type FilterKey, type Filters,
@@ -62,26 +63,13 @@ function geneticsText(p: Patient) {
 
 // ---------- Stat cards ----------
 
-function StatCard({
-  label, value, footer, hero, active, onClick,
-}: { label: string; value: number; footer: ReactNode; hero?: boolean; active: boolean; onClick: () => void }) {
+// Role-based queue as a toggle filter: count is always shown, so the chip keeps its width when switched on.
+function QueueChip({ queue, active, onClick }: { queue: QueueId; active: boolean; onClick: () => void }) {
+  const { label, hint, test } = QUEUES[queue]
   return (
-    <button
-      onClick={onClick}
-      className={`group flex flex-col rounded-card p-5 text-left transition-shadow cursor-pointer ${
-        hero ? 'bg-ink-900 text-white' : 'bg-surface'
-      } ${active ? 'ring-2 ring-ink-900 ring-offset-2 ring-offset-canvas' : ''}`}
-    >
-      <div className="flex items-start justify-between">
-        <span className={`text-[15px] font-medium ${hero ? 'text-white/80' : 'text-ink-600'}`}>{label}</span>
-        <span className={`flex size-8 items-center justify-center rounded-full border transition-colors ${
-          hero ? 'border-white/30 group-hover:bg-white group-hover:text-ink-900' : 'border-border group-hover:bg-ink-900 group-hover:text-white'
-        }`}>
-          <ArrowUpRight size={16} />
-        </span>
-      </div>
-      <span className="num mt-3 text-[40px] leading-none font-normal tracking-[-0.02em]">{value}</span>
-      <span className={`mt-3 text-xs ${hero ? 'text-white/70' : 'text-ink-600'}`}>{footer}</span>
+    <button aria-pressed={active} title={hint} className={chipClass(active, false)} onClick={onClick}>
+      {label}
+      <span className={`num ${active ? 'text-white/70' : 'text-ink-400'}`}>{PATIENTS.filter(test).length}</span>
     </button>
   )
 }
@@ -90,22 +78,23 @@ function StatCard({
 
 function AiInterpretation({ result, onClear }: { result: ParseResult; onClear: () => void }) {
   const [why, setWhy] = useState(false)
-  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null)
 
   return (
-    <div className="rounded-card border border-ai-100 bg-ai-50 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-[15px] font-semibold text-ai-700">
-            <Sparkles size={16} /> Rozumiem tomu takto
-          </div>
-          <p className="mt-1 text-[13px] text-ink-600">„{result.query}“</p>
+    <div className="rounded-card border border-ai-100 bg-ai-50 px-5 py-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-2 text-[15px]">
+          <Sparkles size={16} className="shrink-0 text-ai-700" />
+          <span className="font-semibold text-ai-700">Hľadám:</span>
+          <span className="truncate text-[13px] text-ink-600" title={result.query}>„{result.query}“</span>
         </div>
-        <Button size="sm" variant="ghost" onClick={onClear}><X size={14} /> Zrušiť</Button>
+        <div className="flex shrink-0 items-center gap-1">
+          <AiFeedback why={why} onWhy={() => setWhy(!why)} />
+          <Button size="sm" variant="ghost" onClick={onClear}><X size={14} /> Zrušiť</Button>
+        </div>
       </div>
 
       {result.matches.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           {result.matches.map((m, i) => (
             <span key={i} className="inline-flex h-8 items-center gap-2 rounded-full border border-ai-100 bg-surface px-3 text-[13px]">
               <span className="text-ink-600">„{m.phrase}“</span>
@@ -117,39 +106,24 @@ function AiInterpretation({ result, onClear }: { result: ParseResult; onClear: (
           ))}
         </div>
       ) : (
-        <p className="mt-3 text-sm text-ink-900">
+        <p className="mt-2 text-sm text-ink-900">
           Vetu sa nepodarilo preložiť na filtre. Skús napr. „deti s nízkym nNO a normálnym TEM“.
         </p>
       )}
 
       {result.unknown.length > 0 && (
-        <p className="mt-3 text-xs text-ink-600">
+        <p className="mt-2 text-xs text-ink-600">
           Nerozpoznané slová (ignorované): {result.unknown.map((w) => `„${w}“`).join(', ')}
         </p>
       )}
 
       {why && (
-        <div className="mt-4 rounded-inner bg-surface p-4 text-[13px] leading-relaxed text-ink-600">
+        <div className="mt-3 rounded-inner bg-surface p-4 text-[13px] leading-relaxed text-ink-600">
           Filtre sú odvodené z kľúčových slov vo vete (napr. „nízke nNO“ = hodnota pod 180 ppb).
           Výsledky ďalej nijako neupravujem ani nezoraďujem – v tabuľke sú presne tí pacienti, ktorí spĺňajú
           <b className="font-semibold text-ink-900"> všetky </b>filtre naraz. Každý filter môžeš zrušiť alebo zmeniť ručne.
         </div>
       )}
-
-      <div className="mt-4 flex items-center gap-1 text-ink-600">
-        <Button size="sm" variant="ghost" onClick={() => setWhy(!why)} className="text-ai-700 hover:text-ai-700">
-          {why ? 'Skryť vysvetlenie' : 'Prečo?'}
-        </Button>
-        <button aria-label="Užitočné" onClick={() => setFeedback('up')}
-          className={`flex size-8 items-center justify-center rounded-full hover:bg-surface cursor-pointer ${feedback === 'up' ? 'text-ai-700' : ''}`}>
-          <ThumbsUp size={15} />
-        </button>
-        <button aria-label="Neužitočné" onClick={() => setFeedback('down')}
-          className={`flex size-8 items-center justify-center rounded-full hover:bg-surface cursor-pointer ${feedback === 'down' ? 'text-ai-700' : ''}`}>
-          <ThumbsDown size={15} />
-        </button>
-        {feedback && <span className="ml-1 text-xs">Ďakujem za spätnú väzbu</span>}
-      </div>
     </div>
   )
 }
@@ -248,7 +222,7 @@ function RowMenu({ id }: { id: string }) {
   const actions: { label: string; to?: string; ai?: boolean }[] = [
     { label: 'Otvoriť profil', to: `/patients/${id}` },
     { label: 'Zdieľať prípad' },
-    { label: 'Nájsť podobných pacientov', to: `/patients/${id}?ai=similar`, ai: true },
+    { label: 'Nájsť podobných pacientov', to: `/patients/${id}/similar`, ai: true },
   ]
   return (
     <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
@@ -375,7 +349,7 @@ export default function PatientList() {
   }
 
   const hasFilters = activeKeys(filters).length > 0 || input.trim() !== ''
-  const chipActive = activeKeys(filters).filter((k) => CHIP_KEYS.includes(k) || k === 'queue')
+  const chipActive = activeKeys(filters).filter((k) => CHIP_KEYS.includes(k) || (k === 'queue' && !ROLE_QUEUES[role].includes(filters.queue!))) // a queue left over from another role has no toggle here
   const facet = <K extends FilterKey>(key: K, value: Filters[K]) => PATIENTS.filter((p) => matches(p, { ...filters, [key]: value })).length
   const ai = (k: FilterKey) => aiKeys.includes(k)
 
@@ -385,26 +359,20 @@ export default function PatientList() {
       <div className="flex items-end justify-between px-1 pt-2">
         <div>
           <h1 className="text-[28px] font-semibold tracking-[-0.01em]">Pacienti</h1>
-          <p className="mt-1 text-ink-600">Prehľad pacientov a stavu ich vyšetrení na jednom mieste.</p>
         </div>
         {role === 'vojtech' && <Button variant="primary" onClick={() => setAdding(true)}><Plus size={18} /> Pridať pacienta</Button>}
       </div>
 
-      {/* My work – role-based queues; click = show the queue across all patients */}
-      <div>
-        <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-400">Moja práca · {ROLES[role].name}</p>
-        <div className="grid grid-cols-4 gap-4">
-          {ROLE_QUEUES[role].map((q, i) => (
-            <StatCard key={q} hero={i === 0} label={QUEUES[q].label} value={PATIENTS.filter(QUEUES[q].test).length} footer={QUEUES[q].hint}
-              active={filters.queue === q} onClick={() => openQueue(q)} />
-          ))}
-        </div>
-      </div>
-
       {/* List card */}
       <div className="rounded-card bg-surface p-6">
+        {/* My work – role-based queues; click = show the queue across all patients */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-border pb-4">
+          <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-400">Moja práca</span>
+          {ROLE_QUEUES[role].map((q) => <QueueChip key={q} queue={q} active={filters.queue === q} onClick={() => openQueue(q)} />)}
+        </div>
+
         {/* Search + filters */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
           <SearchBox value={input} onAsk={ask} onChange={(v) => { setInput(v); if (!v) setAiResult(null) }} />
           <FilterMenu label="Stav" multi options={STATUS_OPTIONS} selected={filters.statuses} ai={ai('statuses')}
             onChange={(v) => setFilter('statuses', v)} count={(v) => facet('statuses', [v])} />
@@ -500,7 +468,7 @@ export default function PatientList() {
         <div className="mt-5 flex flex-wrap items-center gap-4 text-xs text-ink-600">
           <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-ok" /> V norme</span>
           <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-bad" /> Mimo normy</span>
-          <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-wait" /> Čaká sa</span>
+          <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-ink-400" /> Čaká sa</span>
           <span className="flex items-center gap-1.5"><span className="hatch inline-block h-3 w-5 rounded-full" /> Nevykonané</span>
           {pageCount > 1 && <Pagination className="ml-auto" page={currentPage} pageCount={pageCount} pageSize={PAGE_SIZE} total={rows.length} onChange={setPage} />}
         </div>

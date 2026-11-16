@@ -1,4 +1,4 @@
-import { MIN_CILIA } from '../data/patients'
+import { MIN_CILIA, MIN_DYNEIN_CILIA } from '../data/patients'
 import { CATEGORY_LABEL, type TemDetails } from '../data/tem'
 import { lowerFirst } from '../labels'
 import type { Patient } from '../types'
@@ -16,6 +16,7 @@ export function draftSources(d: TemDetails): string[] {
   return [
     `${d.evaluated} vyhodnotených riasiniek na ${d.images.filter((i) => i.evaluated).length} snímkach (CiliaScan, ${d.syncedAt})`,
     top ? `Prevažuje: ${lowerFirst(CATEGORY_LABEL[top.category])} – ${top.n} z ${d.evaluated} (${pct(top.n, d.evaluated)} %)` : 'Bez prevažujúcej kategórie',
+    `${d.summary.dynein} riasiniek hodnotených na dyneínové ramienka (minimum ${MIN_DYNEIN_CILIA})`,
     `Šablóna správy oddelenia (verzia 2025)`,
     ...(d.evaluated < MIN_CILIA ? [`Menej ako ${MIN_CILIA} riasiniek → doplnená poznámka o spoľahlivosti`] : []),
     `Iné vyšetrenia (nNO, genetika) do textu správy zámerne nevstupujú`,
@@ -34,7 +35,7 @@ export function draftReport(p: Patient, d: TemDetails): string {
 
   return [
     `Elektrónovo-mikroskopické vyšetrenie respiračného epitelu, pacient ${p.id}, odber ${p.sampleNo}.`,
-    `Vyhodnotených ${total} priečnych rezov riasiniek na ${d.images.filter((i) => i.evaluated).length} snímkach.`,
+    `Vyhodnotených ${total} priečnych rezov riasiniek na ${d.images.filter((i) => i.evaluated).length} snímkach, z toho ${d.summary.dynein} hodnotených na dyneínové ramienka.`,
     '',
     ...lines,
     '',

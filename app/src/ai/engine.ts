@@ -81,6 +81,91 @@ export function outcomeSummary(similar: SimilarCase[]) {
   }
 }
 
+// ---------- Case comparison: the doctor sees and controls what "similar" means ----------
+
+export interface SimilarityCriterion {
+  id: string
+  label: string
+  matches: (q: Patient) => boolean
+}
+
+/** What can be compared for this patient – only values it actually has, in the order the defaults are tried. */
+export function similarityCriteria(p: Patient): SimilarityCriterion[] {
+  const e = p.exams
+  const out: SimilarityCriterion[] = []
+  if (e.tem.defect && (e.tem.status === 'normal' || e.tem.status === 'abnormal')) out.push({
+    id: 'tem', label: `TEM: ${lowerFirst(DEFECT_LABEL[e.tem.defect])}`,
+    matches: (q) => q.exams.tem.defect === e.tem.defect && q.exams.tem.status === e.tem.status,
+  })
+  const band = nnoBand(p)
+  if (band) out.push({ id: 'nno', label: band === 'low' ? 'Nízke nNO' : 'nNO v norme', matches: (q) => nnoBand(q) === band })
+  FLAGS.filter((f) => f.get(p)).forEach((f) => out.push({ id: f.label, label: f.label, matches: f.get }))
+
+  const status = (k: 'hsvm' | 'if', name: string) => {
+    const s = e[k].status
+    if (s === 'normal' || s === 'abnormal') out.push({
+      id: k, label: `${name} ${s === 'normal' ? 'v norme' : 'mimo normy'}`, matches: (q) => q.exams[k].status === s,
+    })
+  }
+  status('hsvm', 'HSVM')
+  status('if', 'IF')
+  if (e.genetics.gene) out.push({
+    id: 'genetics', label: `Variant v géne ${e.genetics.gene}`, matches: (q) => q.exams.genetics.gene === e.genetics.gene,
+  })
+  return out
+}
+
+/** Strict match: a patient is in the group only if every selected criterion holds, so the group is easy to explain. */
+export function findCohort(p: Patient, criteria: SimilarityCriterion[]): SimilarCase[] {
+  if (criteria.length === 0) return []
+  const closed = (c: SimilarCase) => c.patient.status === 'confirmed' || c.patient.status === 'excluded'
+  return PATIENTS.filter((q) => q.id !== p.id && criteria.every((c) => c.matches(q)))
+    .map((q) => compare(p, q))
+    .sort((a, b) => Number(closed(b)) - Number(closed(a)) || b.score - a.score)
+}
+
+const MIN_COHORT = 3
+const MAX_COHORT = 6
+const MAX_DEFAULT_CRITERIA = 3 // stay broad: a stricter default would hide exactly the excluded look-alikes
+
+/** Pre-selection the doctor can change: narrows the group step by step, but never below MIN_COHORT patients. */
+export function defaultCriteria(p: Patient, criteria: SimilarityCriterion[]): string[] {
+  const picked: SimilarityCriterion[] = []
+  for (const c of criteria) {
+    const size = findCohort(p, [...picked, c]).length
+    if (size < MIN_COHORT) continue
+    picked.push(c)
+    if (size <= MAX_COHORT || picked.length === MAX_DEFAULT_CRITERIA) break
+  }
+  return picked.map((c) => c.id)
+}
+
+/** Exams not finished when a patient was excluded – the exclusion may rest on incomplete results. */
+export function missingAtExclusion(q: Patient): string[] {
+  if (q.status !== 'excluded') return []
+  return (Object.keys(EXAM_NAMES) as (keyof typeof EXAM_NAMES)[])
+    .filter((k) => q.exams[k].status === 'pending' || q.exams[k].status === 'notDone')
+    .map((k) => EXAM_NAMES[k])
+}
+
+export interface OpenLead {
+  exam: string
+  abnormal: number
+  confirmed: number
+}
+
+/** Exams this patient still lacks, with how they came out in the confirmed patients of the group. */
+export function openLeads(p: Patient, cohort: SimilarCase[]): OpenLead[] {
+  const confirmed = cohort.filter((c) => c.patient.status === 'confirmed').map((c) => c.patient)
+  return (['hsvm', 'if', 'genetics'] as const)
+    .filter((k) => p.exams[k].status === 'pending' || p.exams[k].status === 'notDone')
+    .map((k) => ({
+      exam: EXAM_NAMES[k],
+      abnormal: confirmed.filter((q) => q.exams[k].status === 'abnormal').length,
+      confirmed: confirmed.length,
+    }))
+}
+
 // ---------- Conflicts (F05) ----------
 
 export interface Conflict {

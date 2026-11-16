@@ -55,10 +55,6 @@ function Sidebar() {
         <NavItem to="/settings" label="Nastavenia" icon={Settings} active={pathname === '/settings'} />
         <NavItem to="/help" label="Pomoc" icon={CircleHelp} active={pathname === '/help'} />
       </nav>
-      <div className="mt-auto rounded-inner bg-surface-muted p-3 text-xs text-ink-600">
-        <p className="font-medium text-ink-900">Prototyp</p>
-        Všetky dáta sú fiktívne.
-      </div>
     </aside>
   )
 }

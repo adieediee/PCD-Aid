@@ -283,7 +283,7 @@ export function TemUploadModal({ p, startIndex, onClose }: { p: Patient; startIn
         >
           <ImagePlus size={28} className="text-ink-400" />
           <p className="mt-3 font-medium">{files.length ? 'Pridať ďalšie snímky' : 'Pretiahni snímky sem'}</p>
-          <p className="mt-1 text-xs text-ink-600">TIFF, JPG alebo PNG · jedna snímka má zvyčajne okolo 8 MB</p>
+          <p className="mt-1 text-xs text-ink-600">TIFF, JPG alebo PNG</p>
           <div className="mt-4 flex gap-2">
             <Button size="sm" onClick={() => inputRef.current?.click()}><Upload size={14} /> Vybrať zo zariadenia</Button>
             <Button size="sm" variant="ghost" onClick={addDemo}>Ukážkové snímky</Button>
@@ -325,7 +325,7 @@ export function TemUploadModal({ p, startIndex, onClose }: { p: Patient; startIn
 
       <div className="mt-6 flex items-center justify-between gap-2 border-t border-border pt-5">
         <p className="text-xs text-ink-600">
-          {done ? 'Snímky sú v TEM tabe ako nevyhodnotené.' : progress ? 'Nezatváraj okno, kým sa nahrávanie nedokončí.' : 'Nahrávanie môže chvíľu trvať.'}
+          {done ? 'Snímky sú v TEM tabe ako nevyhodnotené.' : progress ? 'Nezatváraj okno, kým sa nahrávanie nedokončí.' : ''}
         </p>
         <div className="flex gap-2">
           {progress == null && <Button onClick={onClose}>Zrušiť</Button>}

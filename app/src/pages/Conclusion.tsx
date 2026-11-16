@@ -3,10 +3,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, Check, CircleCheck, Sparkles } from 'lucide-react'
 import { Button, ExamPill, PatientStatusPill, ToggleChip } from '../components/ui'
 import { AiFeedback } from '../components/AiPanel'
-import { MIN_CILIA, PATIENTS, PICADAR_MAX, ageOf, CLINICAL_INDEX_ITEMS } from '../data/patients'
+import { MIN_CILIA, PATIENTS, PICADAR_MAX, CLINICAL_INDEX_ITEMS } from '../data/patients'
+import { PatientFacts } from '../components/PatientFacts'
 import { outcomeSummary, secondOpinion, type Finding, type SecondOpinion, type Verdict } from '../ai/engine'
 import { saveConclusion, useConclusion, type Conclusion as ConclusionData } from '../conclusions'
-import { DEFECT_LABEL, PATIENT_STATUS, ROLES } from '../labels'
+import { DEFECT_LABEL, PATIENT_STATUS, ROLES, formatDate } from '../labels'
 import { useRole } from '../role'
 import type { Patient } from '../types'
 
@@ -19,11 +20,6 @@ const VERDICTS: { value: Verdict; label: string; hint: string }[] = [
 ]
 
 const NEXT_STEPS = ['Doplniť genetiku', 'Doplniť IF', 'Tomografia', 'Zopakovať nNO', 'Nový odber na TEM', 'Kontrola o 6 mesiacov']
-
-function formatDate(iso: string) {
-  const [y, m, d] = iso.split('-').map(Number)
-  return `${d}. ${m}. ${y}`
-}
 
 // ---------- Left column: evidence (no AI here – the doctor decides first) ----------
 
@@ -256,7 +252,8 @@ export default function ConclusionPage() {
 
       <div className="px-1">
         <h1 className="text-[28px] font-semibold tracking-[-0.01em]">Záver · <span className="font-mono">{p.id}</span></h1>
-        <p className="num mt-1 text-ink-600">Odber {p.sampleNo} · nar. {p.birthYear} ({ageOf(p)} r.) · záver stanovuje ošetrujúci lekár</p>
+        <p className="mt-1 text-ink-600">Záver stanovuje ošetrujúci lekár</p>
+        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1"><PatientFacts p={p} /></div>
       </div>
 
       <div className="grid grid-cols-3 items-start gap-4">
